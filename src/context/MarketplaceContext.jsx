@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { cartApi } from '../API/cart';
 import { useAuth } from './AuthContext';
+import { useToast } from '../components/Toast';
 
 const MarketplaceContext = createContext(null);
 
@@ -28,6 +29,7 @@ const normalizeCart = (items) => (Array.isArray(items) ? items.map(normalizeCart
 
 export function MarketplaceProvider({ children }) {
   const { user } = useAuth();
+  const toast = useToast();
   const [cart, setCart] = useState([]);
   const [wishlist, setWishlist] = useState(read('mvec_wishlist'));
   const [cartLoading, setCartLoading] = useState(false);
@@ -62,16 +64,18 @@ export function MarketplaceProvider({ children }) {
         localStorage.setItem('mvec_cart', JSON.stringify(next));
         return next;
       });
+      toast.success('Added to cart');
       return;
     }
     try {
       const productId = product._id || product.id;
       const res = await cartApi.add(productId, qty);
       setCart(normalizeCart(res?.cart?.items));
+      toast.success('Added to cart');
     } catch {
-      // silent
+      toast.error('Could not add to cart. Please try again.');
     }
-  }, [user]);
+  }, [user, toast]);
 
   const removeFromCart = useCallback(async (id) => {
     if (!user) {
@@ -80,15 +84,17 @@ export function MarketplaceProvider({ children }) {
         localStorage.setItem('mvec_cart', JSON.stringify(next));
         return next;
       });
+      toast.info('Removed from cart');
       return;
     }
     try {
       const res = await cartApi.remove(id);
       setCart(normalizeCart(res?.cart?.items));
+      toast.info('Removed from cart');
     } catch {
-      // silent
+      toast.error('Could not remove the item.');
     }
-  }, [user]);
+  }, [user, toast]);
 
   const updateCartQty = useCallback(async (id, qty) => {
     const newQty = Math.max(1, qty);
@@ -124,15 +130,15 @@ export function MarketplaceProvider({ children }) {
 
   const toggleWishlist = useCallback((product) => {
     const pid = product._id || product.id;
-    setWishlist((prev) => {
-      const exists = prev.some(x => String(x._id || x.id) === String(pid));
-      const next = exists
-        ? prev.filter(x => String(x._id || x.id) !== String(pid))
-        : [...prev, product];
-      localStorage.setItem('mvec_wishlist', JSON.stringify(next));
-      return next;
-    });
-  }, []);
+    const exists = wishlist.some(x => String(x._id || x.id) === String(pid));
+    const next = exists
+      ? wishlist.filter(x => String(x._id || x.id) !== String(pid))
+      : [...wishlist, product];
+    setWishlist(next);
+    localStorage.setItem('mvec_wishlist', JSON.stringify(next));
+    if (exists) toast.info('Removed from wishlist');
+    else toast.success('Added to wishlist');
+  }, [wishlist, toast]);
 
   const isWishlisted = useCallback((id) => {
     return wishlist.some(x => String(x._id || x.id) === String(id));

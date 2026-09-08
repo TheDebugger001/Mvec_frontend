@@ -3,18 +3,19 @@ import {useEffect,useState} from "react";
 import Storefront from "../components/Storefront";
 import {demoOrders,products} from "../data";
 import {calculateCommission,cancelOrderByBuyer,getDeliveryRemaining,getOrders,releaseSettlement,updateOrder,syncOrderLifecycle} from "../services/mvecStore";
+import {useToast} from "../components/Toast";
 const money=n=>new Intl.NumberFormat("en-RW").format(Number(n)||0)+" RWF";
 const fmt=ms=>{const s=Math.max(0,Math.floor(ms/1000));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`};
 const canCancel=o=>o.payment==='SUCCESS'&&o.refundStatus!=='FULL'&&o.status!=='Cancelled'&&o.paidAt&&Date.now()-new Date(o.paidAt).getTime()<=30*60*1000;
 export default function OrderDetails(){
- const {id}=useParams();const [tick,setTick]=useState(0),[reported,setReported]=useState(false),[reason,setReason]=useState(""),[review,setReview]=useState(""),[message,setMessage]=useState("");
+ const {id}=useParams();const toast=useToast();const [tick,setTick]=useState(0),[reported,setReported]=useState(false),[reason,setReason]=useState(""),[review,setReview]=useState(""),[message,setMessage]=useState("");
  useEffect(()=>{const t=setInterval(()=>{syncOrderLifecycle();setTick(x=>x+1)},1000);return()=>clearInterval(t)},[]);
  const local=getOrders().find(x=>String(x.id)===String(id));const order=local||demoOrders.find(x=>String(x.id)===String(id))||demoOrders[0];
  const item=order.items?.[0],p=products.find(x=>String(x.id)===String(item?.productId))||products.find(x=>x.vendor===order.vendor)||products[0];
  const statusList=["Created","Payment Confirmed","Preparing","Shipped","Out for Delivery","Delivered","Completed"];const idx=Math.max(0,statusList.indexOf(order.status));const remaining=getDeliveryRemaining(order);
- const report=()=>{if(!reason)return;updateOrder(order.id,{disputeStatus:"open",disputeReason:reason});setReported(true)};
- const reviewOrder=()=>{if(review.trim())updateOrder(order.id,{review:review.trim(),reviewStatus:"submitted"})};
- const cancel=()=>{try{cancelOrderByBuyer(order.id);setMessage("Order cancelled successfully. A full refund has been recorded.")}catch(e){setMessage(e.message)}};
+const report=()=>{if(!reason)return;updateOrder(order.id,{disputeStatus:"open",disputeReason:reason});setReported(true);toast.success("Problem reported. MVEC support can review the order.")};
+  const reviewOrder=()=>{if(review.trim()){updateOrder(order.id,{review:review.trim(),reviewStatus:"submitted"});toast.success("Review submitted. Thanks for your feedback!")}};
+  const cancel=()=>{try{cancelOrderByBuyer(order.id);const m="Order cancelled successfully. A full refund has been recorded.";setMessage(m);toast.success(m)}catch(e){setMessage(e.message);toast.error(e.message)}};
  return <Storefront><main className="account-page"><div className="page-title"><span className="eyebrow">ORDER DETAILS</span><h1>{order.id}</h1><p>{item?.name||p.name} · {order.date}</p></div>
  {message&&<div className="form-alert success">{message}</div>}
  <div className="detail-grid"><section className="data-card"><div className="data-card-head"><div><h3>Order information</h3><span>{order.date}</span></div><em className="status active">{order.status}</em></div><div className="order-product"><img src={p.image} alt=""/><div><b>{item?.name||p.name}</b><small>{p.sku} · Qty {item?.qty||1}</small><strong>{money(order.total)}</strong></div></div><div className="order-summary-lines"><span>Products <b>{money(order.subtotal||order.total)}</b></span><span>Shipping <b>{money(order.shipping||0)}</b></span><span className="grand">Grand total <b>{money(order.total)}</b></span></div></section>

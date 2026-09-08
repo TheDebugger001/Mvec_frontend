@@ -5,6 +5,7 @@ import {products} from "../data";
 import {useMarketplace} from "../context/MarketplaceContext";
 import {useAuth} from "../context/AuthContext";
 import {createOrder, snapshotOrderPricing} from "../services/mvecStore";
+import {useToast} from "../components/Toast";
 
 const money=n=>new Intl.NumberFormat("en-RW").format(Number(n)||0)+" RWF";
 
@@ -12,6 +13,7 @@ export default function Checkout(){
   const [params]=useSearchParams(), navigate=useNavigate();
   const {cart, clearCart}=useMarketplace();
   const {user}=useAuth();
+  const toast=useToast();
   const pid=params.get("product"), p=products.find(x=>String(x.id)===pid);
   const items=useMemo(()=>p?[{...p,qty:Number(params.get("qty")||1)}]:cart,[p,cart,params]);
   const [form,setForm]=useState({name:user?.fullName||"",phone:user?.telephone||"",email:user?.email||"",province:"Kigali City",district:"Gasabo",sector:"Remera",address:"KG 11 Ave, Kigali",method:"standard"});
@@ -23,8 +25,8 @@ export default function Checkout(){
   function update(e){setForm({...form,[e.target.name]:e.target.value});}
   function continuePayment(e){
     e.preventDefault(); setError("");
-    if(!form.name||!form.phone||!form.address){setError("Please complete your name, phone number and delivery address.");return;}
-    if(!items.length){setError("Your cart is empty.");return;}
+    if(!form.name||!form.phone||!form.address){setError("Please complete your name, phone number and delivery address.");toast.error("Please complete your name, phone number and delivery address.");return;}
+    if(!items.length){setError("Your cart is empty.");toast.error("Your cart is empty.");return;}
     const order=createOrder({
       buyer:user?.fullName||form.name,buyerPhone:form.phone,buyerEmail:form.email||"",
       vendor:items[0].vendor, items:items.map(x=>({productId:x.id,name:x.name,qty:x.qty,price:x.price,image:x.image,vendor:x.vendor})),
@@ -33,6 +35,7 @@ export default function Checkout(){
       internalSettlement:{baseProductPrice:pricing.basePrice,mvecCommission:pricing.mvecCommission,deliveryAllocation:pricing.delivery,discount:pricing.discount,vendorSettlement:pricing.vendorSettlement}
     });
     if(!p) clearCart();
+    toast.success("Order created — continue to payment.");
     navigate(`/payment/${order.id}`);
   }
   return <Storefront><main className="checkout-page">

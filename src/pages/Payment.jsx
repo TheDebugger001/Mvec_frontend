@@ -2,10 +2,12 @@ import {useState} from "react";
 import {useNavigate,useParams} from "react-router-dom";
 import Storefront from "../components/Storefront";
 import {getOrders, confirmPayment} from "../services/mvecStore";
+import {useToast} from "../components/Toast";
 const money=n=>new Intl.NumberFormat("en-RW").format(Number(n)||0)+" RWF";
 
 export default function Payment(){
   const navigate=useNavigate(),{id}=useParams();
+  const toast=useToast();
   const [method,setMethod]=useState("momo"),[processing,setProcessing]=useState(false),[done,setDone]=useState(false),[error,setError]=useState("");
   const order=getOrders().find(o=>String(o.id)===String(id));
   if(!order)return <Storefront><main className="account-page"><div className="form-alert error">Order not found.</div></main></Storefront>;
@@ -15,8 +17,9 @@ export default function Payment(){
       try{
         confirmPayment(id,method);
         setDone(true);
+        toast.success("Payment confirmed ✓");
         setTimeout(()=>navigate(`/orders/${id}`),500);
-      }catch{setError("Payment could not be completed. Please try again.");setProcessing(false);}
+      }catch{setError("Payment could not be completed. Please try again.");toast.error("Payment could not be completed. Please try again.");setProcessing(false);}
     },700);
   };
   return <Storefront><main className="payment-page"><div className="page-title"><span className="eyebrow">PAYMENT</span><h1>Pay for your order</h1><p>Order #{order.id} · Total {money(order.total)}</p></div>

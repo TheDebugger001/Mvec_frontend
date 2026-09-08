@@ -78,9 +78,16 @@ export function mapBackendCategory(c) {
   };
 }
 
+const mergeProducts = (backendProducts) => {
+  if (!backendProducts || !backendProducts.length) return mockProducts;
+  const byName = new Set(backendProducts.map((p) => (p.name || '').toLowerCase()));
+  const extras = mockProducts.filter((p) => !byName.has((p.name || '').toLowerCase()));
+  return [...backendProducts, ...extras];
+};
+
 const toCache = (result) => ({
   ...result,
-  products: result.backendProducts && result.backendProducts.length ? result.backendProducts : mockProducts,
+  products: mergeProducts(result.backendProducts),
   categories: result.backendCategories && result.backendCategories.length ? result.backendCategories : mockCategories,
   vendors: result.backendVendors && result.backendVendors.length ? result.backendVendors : mockVendors,
 });

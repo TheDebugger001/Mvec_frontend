@@ -3,6 +3,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import Icon from "../components/Icon";
 import Pagination from "../components/Pagination";
 import {createOrder,confirmPayment,addNotification} from "../services/mvecStore";
+import {useToast} from "../components/Toast";
 
 const suppliers=[
  {name:"Rwanda Wholesale Suppliers",category:"Electronics",rating:4.8,products:126,moq:10,location:"Kigali",verified:true},
@@ -17,7 +18,7 @@ const suppliers=[
 ];
 
 export default function VendorNetwork(){
- const [q,setQ]=useState("");const [page,setPage]=useState(1);const [message,setMessage]=useState("");const perPage=6;
+ const [q,setQ]=useState("");const [page,setPage]=useState(1);const toast=useToast();const perPage=6;
  const filtered=useMemo(()=>suppliers.filter(s=>`${s.name} ${s.category} ${s.location}`.toLowerCase().includes(q.trim().toLowerCase())),[q]);
  const safePage=Math.min(page,Math.max(1,Math.ceil(filtered.length/perPage)));
  const rows=filtered.slice((safePage-1)*perPage,safePage*perPage);
@@ -27,11 +28,11 @@ export default function VendorNetwork(){
   const order=createOrder({buyer:"Kigali Tech Store",buyerPhone:"+250 788 100 002",vendor:"Kigali Tech Store",supplier:s.name,orderType:"supplier",items:[{productId:`SUP-${s.products}`,name:`${s.category} wholesale order`,qty:s.moq,price:Math.round(total/s.moq)}],subtotal:total,shipping:0,total,address:"Kigali",deliveryMethod:"B2B",commission:0});
   confirmPayment(order.id,"momo");
   addNotification({role:"supplier",recipient:s.name,type:"payment",title:"Vendor order paid successfully",message:`Kigali Tech Store paid ${order.id}. The full supplier amount is protected pending supply delivery and receipt confirmation.`,reference:order.id});
-  setMessage(`Paid B2B order ${order.id} created. ${s.name} has been notified.`);
+  toast.success(`Paid B2B order ${order.id} created. ${s.name} has been notified.`);
  };
  return <DashboardLayout><div className="dash-page-head"><div><span className="eyebrow">B2B MARKETPLACE</span><h1>Find suppliers</h1><p>Buy wholesale products from verified suppliers and grow your store.</p></div></div>
  <div className="dash-toolbar"><div className="dash-filter"><Icon name="search"/><input value={q} onChange={search} placeholder="Search suppliers, categories or location…"/></div><span className="table-count">{filtered.length} supplier{filtered.length===1?'':'s'}</span></div>
- {message&&<div className="success-text">{message}</div>}
+ 
  <div className="dash-grid supplier-search-grid">{rows.map(s=><div className="data-card" key={s.name}><div className="data-card-head"><div><h3>{s.name}</h3><span>{s.category} · {s.location}</span></div>{s.verified&&<em className="status active">Verified ✓</em>}</div><div className="profile-detail"><span>Rating: <b>{s.rating}/5</b></span><span>Wholesale products: <b>{s.products}</b></span><span>Minimum order: <b>{s.moq} units</b></span></div><button className="gradient-btn" onClick={()=>placeOrder(s)}>Place B2B order & pay</button></div>)}</div>
  {!rows.length&&<div className="data-card table-empty">No suppliers match your search.</div>}
  <Pagination page={safePage} setPage={setPage} total={filtered.length} perPage={perPage}/>
