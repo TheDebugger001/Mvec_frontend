@@ -24,6 +24,10 @@ export const authApi = {
       .post("/auth/login", backendPayload)
       .then((r) => mapAuthResponse(r.data));
   },
+  googleLogin: (idToken) =>
+    client
+      .post("/auth/google-login", { idToken })
+      .then((r) => mapAuthResponse(r.data)),
   me: () =>
     client.get("/auth/me").then((r) => mapUser(r.data.user)),
   changePassword: (payload) =>

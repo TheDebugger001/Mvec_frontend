@@ -44,6 +44,12 @@ export function AuthProvider({ children }) {
     return data.user;
   }
 
+  async function googleLogin(idToken) {
+    const data = await authApi.googleLogin(idToken);
+    persistSession(data);
+    return data.user;
+  }
+
   async function resetPassword(email) {
     return authApi.forgotPassword({ email });
   }
@@ -58,7 +64,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, resetPassword, logout, refresh, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, googleLogin, resetPassword, logout, refresh, setUser }}>
       {children}
     </AuthContext.Provider>
   );
