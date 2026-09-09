@@ -1,4 +1,4 @@
-import {useMemo,useState} from 'react';
+import {useMemo,useState,useEffect} from 'react';
 import {Link,useLocation} from 'react-router-dom';
 import Icon from '../components/Icon';
 import SmartTable from '../components/SmartTable';
@@ -6,6 +6,11 @@ import DashboardLayout from '../components/DashboardLayout';import Storefront fr
 import {products,categories,vendors} from '../data';
 import {getOrders,updateOrder,getCommissionRate,calculateCommission,store} from '../services/mvecStore';
 import {useToast} from '../components/Toast';
+import {monetizationApi} from '../API/monetization';
+import {extractErrorMessage} from '../API/client';
+import {reviewsApi,shippingApi,notificationsApi} from '../API';
+
+const titleCase=s=>String(s||'').toLowerCase().split('_').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
 
 const money=n=>new Intl.NumberFormat('en-RW').format(Number(n)||0)+' RWF';
 const dateDMY=d=>new Date(d).toLocaleDateString('en-GB');
@@ -16,6 +21,162 @@ const write=(k,v)=>localStorage.setItem(`mvec_${RELEASE}_${k}`,JSON.stringify(v)
 function Header({eyebrow,title,desc,action}){return <div className="dash-page-head"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{desc}</p></div>{action}</div>}
 function Metric({label,value,sub,icon='chart'}){return <div className="metric"><div className="metric-icon"><Icon name={icon}/></div><div><span>{label}</span><strong>{value}</strong><small>{sub}</small></div></div>}
 function SettingCard({title,desc,children}){return <div className="data-card"><h3>{title}</h3>{desc&&<p className="tiny">{desc}</p>}{children}</div>}
+
+// INTEGRATION LAYER: vendor/admin subscription & advertisement pages hit the
+// real backend (/api/vendor, /api/buyer, /api/admin) and fall back to the
+// existing localStorage mock whenever the API or authentication is unavailable.
+
+function hasToken(){return !!localStorage.getItem('huska_token');}
+
+function MonetizationModule({role,type}){
+ const toast=useToast();
+ const [rows,setRows]=useState(null);
+ const [subData,setSubData]=useState(null);
+ const [error,setError]=useState('');
+ const [loading,setLoading]=useState(true);
+
+ useEffect(()=>{
+   let mounted=true;
+   const load=async()=>{
+     if(!hasToken()){setLoading(false);return;}
+     try{
+       if(role==='vendor'&&type==='subscription'){
+         const r=await monetizationApi.getVendorSubscription();
+         if(!mounted)return;
+         setSubData(r);
+         setRows(r.tiers||[]);
+       } else if(role==='vendor'&&type==='advertisements'){
+         const r=await monetizationApi.getVendorAdvertisements();
+         if(!mounted)return;
+         setRows(r.data||[]);
+       } else if(role==='admin'&&type==='subscriptions'){
+         const r=await monetizationApi.getAdminSubscriptions();
+         if(!mounted)return;
+         const combined=r.data||[];
+         try{
+           const buyer=await monetizationApi.getAdminBuyerSubscriptions();
+           combined.push(...(buyer.data||[]));
+         }catch(e){/* buyer branch optional */}
+         setRows(combined);
+       } else if(role==='admin'&&type==='advertising'){
+         const r=await monetizationApi.getAdminAdvertisements();
+         if(!mounted)return;
+         setRows(r.data||[]);
+       }
+     }catch(err){
+       if(mounted)setError(extractErrorMessage(err));
+     }finally{
+       if(mounted)setLoading(false);
+     }
+   };
+   load();
+   return ()=>{mounted=false;};
+ },[role,type]);
+
+ const defaults={
+  advertisements:[{id:'AD-1001',product:'Samsung Galaxy S25',placement:'Homepage hero',budget:150000,status:'Active',clicks:1820,impressions:28400},{id:'AD-1002',product:'Classic Leather Sneakers',placement:'Fashion category',budget:80000,status:'Scheduled',clicks:0,impressions:0},{id:'AD-1003',product:'Office Chair Pro',placement:'Search results',budget:95000,status:'Paused',clicks:412,impressions:7900}],
+  subscription:[{id:'SUB-V-101',plan:'Vendor Premium',holder:'Kigali Tech Store',price:15000,billing:'Monthly',renewal:'30/09/2026',status:'Active'},{id:'SUB-V-102',plan:'Vendor Premium',holder:'Fashion Rwanda',price:15000,billing:'Monthly',renewal:'—',status:'Available'}],
+  advertising:[{id:'AD-ADM-01',vendor:'Kigali Tech Store',product:'Samsung Galaxy S25',placement:'Homepage',budget:250000,status:'Active',ctr:'6.4%'},{id:'AD-ADM-02',vendor:'Fashion Rwanda',product:'Classic Leather Sneakers',placement:'Fashion category',budget:100000,status:'Pending approval',ctr:'—'}],
+  subscriptions:[{id:'SUB-001',holder:'Kigali Tech Store',type:'Vendor Premium',amount:15000,cycle:'Monthly',status:'Active'},{id:'SUB-002',holder:'Aline Uwase',type:'Buyer Ad Removal',amount:5000,cycle:'Monthly',status:'Active'},{id:'SUB-003',holder:'Fashion Rwanda',type:'Vendor Premium',amount:15000,cycle:'Monthly',status:'Expired'}],
+ };
+
+ const stored=read(`mvec_${role}_${type}`,null);
+ const mock=stored||defaults[type]||[];
+ const fallbackRows=subData?rows||[]:(rows&&rows.length?rows:mock);
+ const display=error||loading?(loading&&hasToken()?mock:mock):(rows===null?mock:rows);
+
+ // Normalise backend rows to the exact shape the SmartTable expects.
+ const normalize=(r)=>{
+   if(type==='subscription'||type==='subscriptions'){
+     return {
+       id:r.id||r.publicId,
+       plan:r.plan||(r.type==='Buyer Ad Removal'?'Buyer Ad Removal':r.type)||'Vendor Premium',
+       holder:r.holder||'—',
+       price:r.price??r.amount??0,
+       billing:r.billing||r.cycle||'Monthly',
+       renewal:r.renewal||'—',
+       status:r.status||'Available',
+     };
+   }
+   if(type==='advertisements'){
+     return {
+       id:r.id||r.publicId,
+       product:r.product,
+       placement:r.placement,
+       budget:r.budget,
+       status:r.status,
+       clicks:r.clicks,
+       impressions:r.impressions,
+     };
+   }
+   if(type==='advertising'){
+     return {
+       id:r.id||r.publicId,
+       vendor:r.vendor||'—',
+       product:r.product,
+       placement:r.placement,
+       budget:r.budget,
+       status:r.status,
+       ctr:r.ctr,
+     };
+   }
+   return r;
+ };
+ const normalized=useMemo(()=>display.map(normalize),[display,type]);
+
+ const cfg=moduleConfig[role][type];
+ const isSub=type==='subscription'||type==='subscriptions';
+ const isAd=type==='advertisements'||type==='advertising';
+ const editable=isSub||isAd;
+
+ const action=(row)=>{
+   const notify=m=>toast.info(m);
+   if(isAd){
+     return <button className="table-action-btn" onClick={async()=>{
+       const next=row.status==='Active'?'Paused':'Active';
+       const optimistic=normalized.map(x=>x.id===row.id?{...x,status:next}:x);
+       setRows(prev=>prev?optimistic:prev);
+       if(hasToken()){
+         try{
+           const endpoint=type==='advertisements'?monetizationApi.updateVendorAdvertisementStatus:monetizationApi.updateAdminAdvertisementStatus;
+           await endpoint(row.id,next==='Active'?'ACTIVE':'PAUSED');
+           notify(`Campaign ${next.toLowerCase()}.`);
+         }catch(e){notify(extractErrorMessage(e));}
+       } else {
+         const src=read(`mvec_${role}_${type}`,defaults[type]);
+         const updated=src.map(x=>String(x.id)===String(row.id)?{...x,status:next}:x);
+         write(`mvec_${role}_${type}`,updated);
+         notify(`Record ${next.toLowerCase()}.`);
+       }
+     }}>{row.status==='Active'?'Pause':'Activate'}</button>;
+   }
+   if(isSub){
+     const target=type==='subscriptions'?'admin':'vendor';
+     return <button className="table-action-btn" onClick={async()=>{
+       const plan=row.planKey==='PREMIUM'||row.plan==='Vendor Premium'||row.plan==='Buyer Ad Removal'?'premium':'free';
+       const next=row.status==='Active'?'Available':'Active';
+       const optimistic=normalized.map(x=>x.id===row.id?{...x,status:next}:x);
+       setRows(prev=>prev?optimistic:prev);
+       if(hasToken()){
+         try{
+           const fn=target==='vendor'?monetizationApi.upgradeVendorSubscription:monetizationApi.upgradeBuyerSubscription;
+           await fn({plan});
+           notify('Subscription updated.');
+         }catch(e){notify(extractErrorMessage(e));}
+       } else {
+         const src=read(`mvec_${role}_${type}`,defaults[type]);
+         const updated=src.map(x=>String(x.id)===String(row.id)?{...x,status:next}:x);
+         write(`mvec_${role}_${type}`,updated);
+         notify(`Record ${next.toLowerCase()}.`);
+       }
+     }}>{row.status==='Active'?'Cancel':'Activate'}</button>;
+   }
+   return null;
+ };
+
+ const rowKey=r=>r.id||r.name||r.plan||r.zone||r.control||r.signal||r.party;
+ return <><Header eyebrow={`${role.toUpperCase()} · ${cfg[0]}`} title={cfg[1]} desc={cfg[2]}/><div className="data-card"><SmartTable columns={Object.keys(normalized[0]||{}).map(k=>({key:k,label:k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()),render:r=>typeof r[k]==='boolean'?r[k]?'Yes':'No':(k==='price'||k==='budget'||k==='amount')&&typeof r[k]==='number'?money(r[k]):String(r[k])}))} rows={normalized} rowKey={rowKey} searchPlaceholder={`Search ${cfg[1].toLowerCase()}…`} exportName={`mvec-${role}-${type}`} actions={action}/></div></>;
+}
 
 const moduleConfig={
  vendor:{
@@ -57,6 +218,7 @@ const moduleConfig={
 
 function GenericTableModule({role,type}){
  const cfg=moduleConfig[role][type];
+ if((role==='vendor'&&(type==='subscription'||type==='advertisements'))||(role==='admin'&&(type==='subscriptions'||type==='advertising'))) return <MonetizationModule role={role} type={type}/>;
  const [rows,setRows]=useState(()=>read(`mvec_${role}_${type}`,null));
  const defaults={
   categories:categories.map((x,i)=>({id:`CAT-${i+1}`,name:x,products:[42,31,27,24,18,16,12,9][i],status:i===6?'Paused':'Active'})),
@@ -85,6 +247,21 @@ function GenericTableModule({role,type}){
   system:[{id:'SYS-001',setting:'Marketplace availability',value:'Operational',scope:'Core platform',lastChanged:'02/09/2026',owner:'Operations'},{id:'SYS-002',setting:'Protected settlement',value:'Enabled',scope:'Payments',lastChanged:'01/09/2026',owner:'Finance'},{id:'SYS-003',setting:'Maintenance mode',value:'Off',scope:'Platform access',lastChanged:'29/08/2026',owner:'Engineering'},{id:'SYS-004',setting:'API health monitoring',value:'Enabled',scope:'Integrations',lastChanged:'02/09/2026',owner:'Engineering'}]
  };
  const defaultRows = role==='admin' && type==='refunds' ? defaults.adminRefunds : defaults[type]; const rawInitial=rows||defaultRows||[]; const initial=role==='supplier'&&type==='transactions'?rawInitial.map(({fee,...r})=>({...r,supplierSettlement:r.supplierSettlement??r.amount})):rawInitial; const [data,setData]=useState(initial);
+ // ── Backend sync layer: hydrate real DB rows for wired modules, fall back to local mock. ──
+ const backendFetch=async()=>{
+   const map=(r)=>{
+     if(type==='reviews')return {id:r.id,product:r.product,reviewer:r.reviewer,rating:r.rating,comment:r.review||r.comment,status:titleCase(r.status||'Published'),date:r.date||r.createdAt};
+     if(type==='shipping')return {id:r.id,zone:r.zone||r.name,fee:r.fee,eta:r.eta,method:r.method,status:titleCase(r.status||'Active')};
+     if(type==='notifications')return {id:r.id,recipient:r.recipient||'',channel:titleCase(r.channel||'In-app'),type:r.type,message:r.message||r.title,status:r.status||(r.isRead?'Read':'Unread'),date:r.createdAt};
+     return r;
+   };
+   if(role==='vendor'&&type==='reviews'){const x=await reviewsApi.getVendorReviews();return (x.data||[]).map(map);}
+   if(role==='vendor'&&type==='shipping'){const x=await shippingApi.getMine();return (x.data||[]).map(map);}
+   if(role==='admin'&&type==='reviews'){const x=await reviewsApi.getAdmin();return (x.data||[]).map(map);}
+   if(role==='admin'&&type==='notifications'){const x=await notificationsApi.getAdmin();return (x.data||[]).map(map);}
+   return null;
+ };
+ useEffect(()=>{let mounted=true;(async()=>{if(!hasToken())return;try{const next=await backendFetch();if(next&&mounted&&next.length){setData(next);write(`mvec_${role}_${type}`,next);}}catch(e){if(mounted)console.warn(type,extractErrorMessage(e));}})();return()=>{mounted=false};},[role,type]);
  const save=next=>{setData(next);write(`mvec_${role}_${type}`,next)};
  const columns=useMemo(()=>{const keys=Object.keys(data[0]||{});return keys.map(k=>({key:k,label:k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()),render:r=>typeof r[k]==='boolean'?r[k]?'Yes':'No':(k==='amount'||k==='budget'||k==='price'&&typeof r[k]==='number')?money(r[k]):k==='rating'?`★ ${r[k]}`:String(r[k])}))},[data]);
  const editable=['advertisements','subscription','shipping','categories'].includes(type);

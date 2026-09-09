@@ -1,11 +1,12 @@
-import {useMemo,useState} from "react";
+import {useEffect,useMemo,useState} from "react";
 import {Link,useNavigate,useSearchParams} from "react-router-dom";
 import Storefront from "../components/Storefront";
-import {products} from "../data";
+import {products as seedProducts} from "../data";
 import {useMarketplace} from "../context/MarketplaceContext";
 import {useAuth} from "../context/AuthContext";
-import {snapshotOrderPricing} from "../services/mvecStore";
+import {getCatalogProducts, snapshotOrderPricing} from "../services/mvecStore";
 import {ordersApi} from "../API/orders";
+import {productsApi} from "../API/products";
 import {extractErrorMessage} from "../API/client";
 import {useToast} from "../components/Toast";
 
@@ -16,7 +17,36 @@ export default function Checkout(){
   const {cart, clearCart}=useMarketplace();
   const {user}=useAuth();
   const toast=useToast();
-  const pid=params.get("product"), p=products.find(x=>String(x.id)===pid);
+  const pid=params.get("product");
+  const [directProduct,setDirectProduct]=useState(() => {
+    if (!pid) return null;
+    const fromCart = cart.find(x=>String(x.productId||x.id)===pid);
+    if (fromCart) return fromCart;
+    const catalog = getCatalogProducts(seedProducts);
+    return catalog.find(x=>String(x.id)===pid) || null;
+  });
+
+  useEffect(()=>{
+    if(!pid || directProduct) return;
+    let active=true;
+    productsApi.getById(pid).then(prod => {
+      if(active && prod){
+        setDirectProduct({
+          id: prod._id || prod.id,
+          productId: prod._id || prod.id,
+          name: prod.name,
+          price: prod.discountPrice || prod.price,
+          image: prod.media?.mainImage || prod.image || "",
+          vendor: prod.vendor?.companyName || prod.vendor?.Fullname || "Marketplace Vendor",
+          vendorId: prod.vendor?._id || prod.vendor?.id || prod.vendor,
+          sku: prod.sku,
+        });
+      }
+    }).catch(()=>{});
+    return ()=>{active=false};
+  },[pid, directProduct]);
+
+  const p = directProduct;
   const items=useMemo(()=>p?[{...p,qty:Number(params.get("qty")||1)}]:cart,[p,cart,params]);
   const [form,setForm]=useState({name:user?.fullName||"",phone:user?.telephone||"",email:user?.email||"",province:"Kigali City",district:"Gasabo",sector:"Remera",address:"KG 11 Ave, Kigali",method:"standard"});
   const [error,setError]=useState("");
@@ -33,7 +63,14 @@ export default function Checkout(){
     setSubmitting(true);
     try{
       const res=await ordersApi.directCheckout({
-        items:items.map(x=>({productId:x.productId||x.id,name:x.name,qty:x.qty,price:x.price,vendor:x.vendor})),
+        items:items.map(x=>({
+          productId:x.productId||x.id,
+          name:x.name,
+          qty:Number(x.qty)||1,
+          price:Number(x.price)||0,
+          vendor:x.vendorId||x.vendor,
+          image:x.image||x.media?.mainImage||"",
+        })),
         shippingAddress:{street:form.address,city:form.district,state:form.province,country:"Rwanda",postalCode:""},
         paymentMethod:"MOMO",
       });

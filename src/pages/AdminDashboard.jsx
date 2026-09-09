@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
 import Icon from "../components/Icon";
@@ -6,6 +6,11 @@ import Pagination from "../components/Pagination";
 import SmartTable from "../components/SmartTable";
 import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from "../services/analytics";
 import {useToast} from "../components/Toast";
+import {usersApi,reportsApi} from "../API";
+import {extractErrorMessage} from "../API/client";
+
+const hasToken=()=>!!localStorage.getItem("huska_token");
+const titleCase=s=>String(s||"").toLowerCase().split("_").map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(" ");
 
 // -----------------------------------------------------------------------------
 // Marketplace data
@@ -213,6 +218,19 @@ function GenericAdminTable({ title, subtitle, type }) {
     return saved.map((item,index)=>{const seed=vendors.find(v=>v.id===item.id||v.name===item.name)||vendors[index]||{};return {...seed,...item,category:item.category||seed.category||'General',products:Number(item.products??seed.products??products.filter(p=>p.vendor===item.name).length),rating:item.rating||seed.rating||0,status:item.status||'Approved'};});
   };
   const [list,setList]=useState(()=>{try{const saved=JSON.parse(localStorage.getItem(storageKey));return normalize(saved||rows)}catch{return normalize(rows)}});
+  // Backend sync: hydrate the admin users list from the real database.
+  useEffect(()=>{
+    let mounted=true;
+    (async()=>{
+      if(type!=='users'||!hasToken())return;
+      try{
+        const r=await usersApi.getAll({limit:200});
+        const next=(r.data||[]).map(u=>({id:u.id,name:u.name||u.fullName||'',email:u.email||'',role:titleCase(u.role||''),status:titleCase(u.status||'Active'),phone:u.phone||''}));
+        if(next.length&&mounted){setList(next);localStorage.setItem(storageKey,JSON.stringify(next));}
+      }catch(e){if(mounted)console.warn(type,extractErrorMessage(e));}
+    })();
+    return ()=>{mounted=false;};
+  },[type]);
   const [editing,setEditing]=useState(null); const [viewing,setViewing]=useState(null);
   const toast=useToast();
   const readOnly=type==='users'||type==='vendors';
@@ -255,7 +273,15 @@ function AdminEditModal({value,isNew,onCancel,onSave}){
  return <div className="modal-backdrop"><div className="modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" onClick={onCancel}>×</button><h2>{isNew?"Add":"Edit"} record</h2><p>Update the marketplace record and save your changes.</p>{fields.map(k=>{const opts=ADMIN_EDIT_ENUMS[k.toLowerCase()];return opts?<label className="field" key={k}><span>{k.replace(/([A-Z])/g," $1")}</span><select value={row[k]??""} onChange={e=>setRow({...row,[k]:e.target.value})}>{[<option key="_" value="">Select…</option>,...opts.map(o=><option key={o} value={o}>{o}</option>)]}</select></label>:<label className="field" key={k}><span>{k.replace(/([A-Z])/g," $1")}</span><input value={row[k]??""} onChange={e=>setRow({...row,[k]:e.target.value})}/></label>})}<div className="modal-actions"><button className="outline-btn" onClick={onCancel}>Cancel</button><button className="gradient-btn" onClick={()=>onSave(row)}>Save changes</button></div></div></div>;
 }
 
-function AdminReports(){const [period,setPeriod]=useState('30 Days');const metrics=getPeriodMetrics(period);const rows=[['Marketplace revenue',period,money(metrics.sales)],['Vendor sales',period,money(Math.round(metrics.sales*.696))],['Transactions',period,metrics.orders],['Refunds',period,Math.max(1,Math.round(metrics.orders*.033))],['Platform commission',period,money(Math.round(metrics.sales*.1496))]].map(r=>({report:r[0],range:r[1],summary:r[2]}));return <DashboardLayout admin><div className="dash-page-head"><div><span className="eyebrow">ADMIN CONTROL</span><h1>Reports</h1><p>Platform-wide revenue, vendors, orders, payments and marketplace performance.</p></div><select className="period-select" value={period} onChange={e=>setPeriod(e.target.value)}><option>30 Days</option><option>3 Months</option><option>1 Year</option></select></div><div className="metric-grid"><Metric label="Revenue" value={money(metrics.sales)} change={`${period} revenue`} icon="chart"/><Metric label="Orders" value={metrics.orders} change={`${period} orders`} icon="cart"/><Metric label="Vendors" value="86" change="Active marketplace vendors" icon="shop"/><Metric label="Commission" value={money(Math.round(metrics.sales*.1496))} change={`${period} commission`} icon="wallet"/></div><div className="data-card"><div className="data-card-head"><div><h3>Platform reports</h3><span>{period} reporting data</span></div></div><SmartTable columns={[{key:'report',label:'Report',render:r=><b>{r.report}</b>},{key:'range',label:'Range'},{key:'summary',label:'Summary'}]} rows={rows} rowKey={r=>r.report} searchPlaceholder="Search reports…" exportName="admin-platform-reports"/></div></DashboardLayout>}
+function AdminReports(){const [period,setPeriod]=useState('30 Days');const [summary,setSummary]=useState(null);const metrics=getPeriodMetrics(period);
+  useEffect(()=>{let mounted=true;(async()=>{if(!hasToken())return;try{const range=period==='30 Days'?'30d':period==='3 Months'?'90d':'1y';const r=await reportsApi.getSummary({range});if(mounted&&r&&r.metrics)setSummary(r.metrics);}catch(e){if(mounted)console.warn('reports',extractErrorMessage(e));}})();return()=>{mounted=false}},[period]);
+  const grossSales=summary?summary.grossSales:metrics.sales;
+  const orders=summary?summary.orders:metrics.orders;
+  const commission=summary?summary.commission:Math.round(metrics.sales*.1496);
+  const refunds=summary?(summary.refunds??Math.max(1,Math.round(orders*.033))):Math.max(1,Math.round(metrics.orders*.033));
+  const vendors=summary?(summary.activeVendors??'86'):'86';
+  const rows=[['Marketplace revenue',period,money(grossSales)],['Vendor sales',period,money(Math.round(grossSales*.696))],['Transactions',period,orders],['Refunds',period,refunds],['Platform commission',period,money(commission)]].map(r=>({report:r[0],range:r[1],summary:r[2]}));
+  return <DashboardLayout admin><div className="dash-page-head"><div><span className="eyebrow">ADMIN CONTROL</span><h1>Reports</h1><p>Platform-wide revenue, vendors, orders, payments and marketplace performance.</p></div><select className="period-select" value={period} onChange={e=>setPeriod(e.target.value)}><option>30 Days</option><option>3 Months</option><option>1 Year</option></select></div><div className="metric-grid"><Metric label="Revenue" value={money(grossSales)} change={`${period} revenue`} icon="chart"/><Metric label="Orders" value={orders} change={`${period} orders`} icon="cart"/><Metric label="Vendors" value={vendors} change="Active marketplace vendors" icon="shop"/><Metric label="Commission" value={money(commission)} change={`${period} commission`} icon="wallet"/></div><div className="data-card"><div className="data-card-head"><div><h3>Platform reports</h3><span>{period} reporting data</span></div></div><SmartTable columns={[{key:'report',label:'Report',render:r=><b>{r.report}</b>},{key:'range',label:'Range'},{key:'summary',label:'Summary'}]} rows={rows} rowKey={r=>r.report} searchPlaceholder="Search reports…" exportName="admin-platform-reports"/></div></DashboardLayout>}
 function AdminSettings(){const initial={marketplaceName:'MVEC',currency:'RWF',vendorApproval:'Manual',commission:'10%',cancellation:'24 hours',reviews:'Required',orders:'Enabled',shipping:'Enabled',payouts:'Enabled'};const [settings,setSettings]=useState(()=>{try{return JSON.parse(localStorage.getItem('mvec_admin_settings'))||initial}catch{return initial}});const [saved,setSaved]=useState(false);const toast=useToast();const u=(key,value)=>setSettings(s=>({...s,[key]:value}));const save=()=>{localStorage.setItem('mvec_admin_settings',JSON.stringify(settings));setSaved(true);setTimeout(()=>setSaved(false),1800);toast.success('Platform settings saved.')};return <DashboardLayout admin><div className="dash-page-head"><div><span className="eyebrow">ADMIN CONTROL</span><h1>Platform Settings</h1><p>Configure marketplace-wide rules and system behavior.</p></div><button className="gradient-btn" onClick={save}>Save changes</button></div>{saved&&<div className="success-text">Platform settings saved.</div>}<div className="settings-grid"><div className="data-card"><h3>Marketplace</h3><label className="field"><span>Marketplace name</span><input value={settings.marketplaceName} onChange={e=>u('marketplaceName',e.target.value)}/></label><label className="field"><span>Default currency</span><select value={settings.currency} onChange={e=>u('currency',e.target.value)}><option>RWF</option><option>USD</option></select></label><label className="field"><span>Vendor approval</span><select value={settings.vendorApproval} onChange={e=>u('vendorApproval',e.target.value)}><option>Manual</option><option>Automatic</option></select></label></div><div className="data-card"><h3>Commerce rules</h3><label className="field"><span>Platform commission</span><input value={settings.commission} onChange={e=>u('commission',e.target.value)}/></label><label className="field"><span>Order cancellation window</span><input value={settings.cancellation} onChange={e=>u('cancellation',e.target.value)}/></label><label className="field"><span>Reviews moderation</span><select value={settings.reviews} onChange={e=>u('reviews',e.target.value)}><option>Required</option><option>Optional</option></select></label></div><div className="data-card"><h3>Notifications</h3><label className="field"><span>Order notifications</span><select value={settings.orders} onChange={e=>u('orders',e.target.value)}><option>Enabled</option><option>Disabled</option></select></label><label className="field"><span>Shipping notifications</span><select value={settings.shipping} onChange={e=>u('shipping',e.target.value)}><option>Enabled</option><option>Disabled</option></select></label><label className="field"><span>Payout notifications</span><select value={settings.payouts} onChange={e=>u('payouts',e.target.value)}><option>Enabled</option><option>Disabled</option></select></label></div></div></DashboardLayout>}
 
 // -----------------------------------------------------------------------------

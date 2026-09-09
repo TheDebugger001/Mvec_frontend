@@ -11,18 +11,21 @@ const read = (key) => {
 
 const normalizeCartItem = (item) => {
   if (!item) return item;
-  const prod = item.product || {};
-  if (typeof prod === 'object' && prod !== null) {
-    const media = prod.media || {};
-    return {
-      ...prod,
-      id: prod._id || prod.id,
-      qty: item.quantity || item.qty || 1,
-      price: item.price != null ? item.price : (prod.discountPrice || prod.price),
-      image: media.mainImage || (Array.isArray(prod.media) ? prod.media[0] : null) || prod.image || '',
-    };
-  }
-  return item;
+  const src = item.product;
+  const prodIsId = typeof src === 'string';
+  const prod = (!prodIsId && src && typeof src === 'object') ? src : {};
+  const rawProductId = prodIsId ? src : (prod._id || prod.id || '');
+  const media = prod.media || {};
+  const prodImages = Array.isArray(prod.media) ? prod.media : (prod.gallery || []);
+  return {
+    ...(prodIsId ? {} : prod),
+    id: prod._id || prod.id || rawProductId,
+    sku: prod.sku || item.sku || '',
+    name: prod.name || item.name || 'Product',
+    qty: item.quantity || item.qty || 1,
+    price: item.price != null ? item.price : (prod.discountPrice || prod.price || item.price || 0),
+    image: media.mainImage || prodImages[0] || prod.image || item.image || '',
+  };
 };
 
 const normalizeCart = (items) => (Array.isArray(items) ? items.map(normalizeCartItem).filter(Boolean) : []);

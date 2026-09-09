@@ -1,9 +1,11 @@
-import {useMemo,useState} from 'react';
+import {useMemo,useState,useEffect} from 'react';
 import {Link,useLocation} from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import SmartTable from '../components/SmartTable';
 import Icon from '../components/Icon';
 import {getLedger,getCommissionRules,saveCommissionRules,calculateOrderPricing,getOrders,recordLedgerEntry,addNotification,getSubscription,setSubscription} from '../services/mvecStore';
+import {monetizationApi} from '../API/monetization';
+import {extractErrorMessage} from '../API/client';
 import {products,vendors} from '../data';
 import {useLanguage} from '../context/LanguageContext';
 import {useToast} from '../components/Toast';
@@ -50,7 +52,18 @@ export function CommunicationPage({role}){
 
 export function BuyerSubscription(){
  const [active,setActive]=useState(()=>getSubscription('buyer')==='premium'); const toast=useToast();
- const toggle=()=>{const next=!active;setSubscription('buyer',next?'premium':'free');setActive(next);toast.success(next?'Premium buyer activated.':'Premium buyer plan cancelled.')};
+ const [syncing,setSyncing]=useState(false);
+ useEffect(()=>{
+   const sync=async()=>{
+     if(!localStorage.getItem('huska_token'))return;
+     try{
+       const r=await monetizationApi.getBuyerSubscription();
+       setActive(r.subscription?.planKey==='PREMIUM');
+     }catch(e){/* fall back to local */}
+   };
+   sync();
+ },[active]);
+ const toggle=async()=>{const next=!active;setActive(next);setSyncing(true);try{if(localStorage.getItem('huska_token')){await monetizationApi.upgradeBuyerSubscription({plan:next?'premium':'free'});setSubscription('buyer',next?'premium':'free');}else{setSubscription('buyer',next?'premium':'free');}toast.success(next?'Premium buyer activated.':'Premium buyer plan cancelled.');}catch(e){toast.error(extractErrorMessage(e));setActive(!next);}finally{setSyncing(false);}};
  return <><Header eyebrow="BUYER" title="Ad removal" desc="Choose whether to reduce non-critical marketplace advertising. Checkout, payment and order tracking remain available either way."/><div className="dash-grid"><div className="data-card"><span className="eyebrow">FREE BUYER</span><h2>RWF 0</h2><p>Standard marketplace experience with relevant sponsored content.</p><ul className="simple-list"><li>Shop all products</li><li>Checkout without interruption</li><li>Order tracking</li></ul><span className={'status '+(!active?'active':'warning')}>{!active?'Current':'Available'}</span></div><div className="data-card"><span className="eyebrow">PREMIUM BUYER</span><h2>RWF 5,000 / month</h2><p>Reduced non-critical advertising while keeping all marketplace functions available.</p><button className={active?'outline-btn':'gradient-btn'} onClick={toggle}>{active?'Cancel plan':'Choose premium'}</button></div></div></>;
 }
 

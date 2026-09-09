@@ -11,8 +11,36 @@ import DeliveryTracking from '../components/DeliveryTracking';
 import NotificationPanel from '../components/NotificationPanel';
 import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from '../services/analytics';
 import {useToast} from '../components/Toast';
+import { usersApi, promotionsApi, reviewsApi, shippingApi, notificationsApi, reportsApi, payoutsApi, productsApi, categoriesApi } from '../API';
+import { extractErrorMessage } from '../API/client';
+import { clearCatalogCache } from '../services/catalogApi';
+
+const hasToken=()=>!!localStorage.getItem('huska_token');
 
 const money = n => new Intl.NumberFormat('en-RW').format(Number(n) || 0) + ' RWF';
+const titleCase = s => String(s||'').toLowerCase().split('_').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+// Convert the vendor product form into the backend Product schema payload.
+const toBackendPayload = p => ({
+  name:p.name, sku:p.sku, brand:p.brand||'', shortDescription:p.shortDescription||'',
+  description:p.description||'', price:Number(p.price)||0,
+  costPrice:p.costPrice?Number(p.costPrice):null, discountPrice:p.discountPrice?Number(p.discountPrice):null,
+  stockQuantity:Math.max(0,Number(p.stock)||0), lowStockThreshold:Math.max(0,Number(p.minStock)||0),
+  status:(Number(p.stock)||0)<=0?'OUT_OF_STOCK':'ACTIVE',
+  media:{mainImage:(p.images&&p.images[0])||p.image||'',gallery:(p.images||[]).filter(Boolean),videos:(p.videos||[]).map(v=>typeof v==='string'?v:(v?.src||''))},
+  attributes:{color:p.color||'',size:p.size||'',material:p.material||'',weight:p.weight||'',capacity:p.capacity||'',model:p.model||''},
+});
+// Resolve a category ObjectId by name (creating the category if it doesn't exist yet).
+const resolveCategoryId = async (name) => {
+  if(!name) return null;
+  try{
+    const res=await categoriesApi.getAll();
+    const cats=(res&&(res.categories||res.data||res))||[];
+    const found=cats.find(c=>String(c.name||c.title||'').toLowerCase()===String(name).toLowerCase());
+    if(found) return found._id||found.id;
+    const created=await categoriesApi.create({name});
+    return (created&&(created.category?._id||created._id||created.category||created.id))||null;
+  }catch(e){console.warn('category',extractErrorMessage(e));return null;}
+};
 const PRODUCT_KEY = 'mvec_vendor_products';
 const CATEGORY_KEY = 'mvec_vendor_categories';
 const readJSON = (key, fallback) => { try { const v = JSON.parse(localStorage.getItem(key)); return v ?? fallback; } catch { return fallback; } };
@@ -135,13 +163,33 @@ function ProductModule(){
     setEditing(null);
     if(new URLSearchParams(location.search).get('add')==='1') navigate('/vendor/products',{replace:true});
   };
-  const saveProduct=p=>{
+  const saveProduct=async p=>{
+    const mode=editing?.mode==='create';
     const owned=normalize({...p,vendor:owner});
-    const next=editing?.mode==='create'?[owned,...rows]:rows.map(x=>x.id===p.id?owned:x);
+    let next=mode?[owned,...rows]:rows.map(x=>x.id===p.id?owned:x);
+    if(hasToken()){
+      try{
+        const catId=await resolveCategoryId(p.category);
+        const payload={...toBackendPayload(owned),category:catId};
+        let backendId;
+        if(mode){
+          const res=await productsApi.create(payload);
+          const saved=res&&(res.product||res);
+          backendId=(saved&&(saved._id||saved.publicId||saved.id))||null;
+        }else if(p.backendId){
+          backendId=p.backendId;
+          await productsApi.update(p.backendId,payload);
+        }
+        if(backendId) next=next.map(x=>x===owned?{...x,id:backendId,backendId}:x);
+        clearCatalogCache();
+      }catch(e){
+        toast.error(extractErrorMessage(e)||'Could not publish product to the marketplace.');
+      }
+    }
     persist(next);
     setEditing(null);
     setPage(1);
-    toast.success(editing?.mode==='create'?'Product created.':'Product saved.');
+    toast.success(mode?'Product created.':'Product saved.');
     navigate('/vendor/products',{replace:true});
   };
   const exportCsv=()=>{
@@ -183,7 +231,64 @@ function ProductModule(){
     )}
   </>;
 }
-function ModulePage({type}){const c=cfg[type],initial=modules[type]||[];const storageKey=`mvec_vendor_${type}`;const toast=useToast();const [rows,setRows]=useState(()=>readJSON(storageKey,initial));const [page,setPage]=useState(1);const [q,setQ]=useState('');const [statusFilter,setStatusFilter]=useState('');const [editing,setEditing]=useState(null);const filtered=useMemo(()=>rows.filter(r=>(Array.isArray(r)?r.join(' '):JSON.stringify(r)).toLowerCase().includes(q.toLowerCase())&&(!statusFilter||String(r[r.length-1])===statusFilter)),[rows,q,statusFilter]);const per=6;const totalPages=Math.max(1,Math.ceil(filtered.length/per));const current=Math.min(page,totalPages);const shown=filtered.slice((current-1)*per,current*per);const editable=['stores','promotions','team','shipping'].includes(type);const add=()=>{if(type==='team')setEditing({row:['New staff member','Sales Staff','Orders, Customers','Active'],new:true});else if(type==='stores')setEditing({row:['New Store','Electronics','0','New','Pending'],new:true});else if(type==='promotions')setEditing({row:['New promotion','CODE','10%','Draft','30 Sep 2026'],new:true});else if(type==='shipping')setEditing({row:['New zone','0 RWF','1–3 days','Standard','Active'],new:true});};const saveEdit=(nextRow,isNew,original)=>{const next=isNew?[nextRow,...rows]:rows.map(r=>r===original?nextRow:r);setRows(next);localStorage.setItem(storageKey,JSON.stringify(next));setEditing(null);setPage(1);toast.success(c.title+' saved.')};const exportCsv=()=>{const esc=v=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[c.headers.map(esc).join(','),...filtered.map(r=>r.map(esc).join(','))].join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`mvec-${type}-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(url)};const statuses=[...new Set(rows.map(r=>String(r[r.length-1]??'')).filter(Boolean))];return <><div className="dash-page-head"><div><span className="eyebrow">SELLER PLATFORM</span><h1>{c.title}</h1><p>{c.desc}</p></div>{editable&&<button className="gradient-btn" onClick={add}><Icon name="plus"/> Add {type==='team'?'staff member':type==='stores'?'store':type.slice(0,-1)}</button>}</div><div className="dash-toolbar"><div className="dash-filter"><Icon name="search"/><input value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} placeholder={`Search ${c.title.toLowerCase()}…`}/></div>{statuses.length>1&&<select className="table-filter-select" value={statusFilter} onChange={e=>{setStatusFilter(e.target.value);setPage(1)}}><option value="">All statuses</option>{statuses.map(x=><option key={x}>{x}</option>)}</select>}<button className="filter-btn" onClick={exportCsv}>Export CSV</button></div><div className="data-card"><div className="data-card-head"><div><h3>{c.title}</h3><span>{filtered.length} records</span></div><span className="muted">Marketplace records</span></div><div className="data-table"><div className={'data-row module-row '+(c.headers.length===4?'four':'')}>{c.headers.map(h=><span className="table-label" key={h}>{h}</span>)}{editable&&<span className="table-label">Actions</span>}</div>{shown.map((r,i)=><div className={'data-row module-row '+(c.headers.length===4?'four':'')} key={`${r[0]}-${i}`}>{r.map((v,j)=><span key={j}>{j===0?<b>{v}</b>:j===c.headers.length-1&&['Active','Completed','Processing','Pending','Scheduled','Unread','Read','Low stock','In stock','Out of stock'].includes(v)?<em className={'status '+(['Active','Completed','Read','In stock'].includes(v)?'active':'warning')}>{v}</em>:v}</span>)}{editable&&<span className="row-actions"><button title={`Edit ${c.title.toLowerCase()}`} onClick={()=>setEditing({row:[...r],original:r})}><Icon name="edit"/></button><button title="Delete record" onClick={()=>{const next=rows.filter(x=>x!==r);setRows(next);localStorage.setItem(storageKey,JSON.stringify(next));toast.info('Record deleted.')}}><Icon name="trash"/></button></span>}</div>)}</div><Pagination page={current} setPage={setPage} total={filtered.length} perPage={per}/></div>{editing&&<EditRows type={type} headers={c.headers} rows={rows} value={editing.row} isNew={editing.new} onCancel={()=>setEditing(null)} onSave={row=>saveEdit(row,editing.new,editing.original)}/>}</>}
+// New ModulePage implementation (backend-sync layer + original JSX preserved)
+function ModulePage({type}){
+  const c=cfg[type],initial=modules[type]||[];const storageKey=`mvec_vendor_${type}`;const toast=useToast();
+  const [rows,setRows]=useState(()=>readJSON(storageKey,initial));const [page,setPage]=useState(1);const [q,setQ]=useState('');const [statusFilter,setStatusFilter]=useState('');const [editing,setEditing]=useState(null);
+
+  // ── Backend sync: normalize DB objects into the array rows the table expects ──
+  const normalizeRow=(r)=>{
+    if(type==='customers')return [r.name||r.fullName||'',String(r.orders||0),money(r.totalSpent||0),r.lastPurchase?new Date(r.lastPurchase).toLocaleDateString('en-GB'):''];
+    if(type==='promotions')return [r.name||'',r.code||'',r.discount??(r.type==='PERCENT'?r.value+'%':(r.value||0)+' RWF'),titleCase(r.status||'DRAFT'),r.endsAt?new Date(r.endsAt).toLocaleDateString('en-GB'):'—'];
+    if(type==='reviews')return [r.product||'',r.reviewer||'',(Number(r.rating||0)>0)?'★'.repeat(Math.round(r.rating)):'',r.review||r.comment||'',r.date?new Date(r.date).toLocaleDateString('en-GB'):''];
+    if(type==='shipping')return [r.name||r.zone||'',money(r.fee||0),r.eta||r.delivery||'—',r.method||(Array.isArray(r.methods)?r.methods.join(' / '):'')||'—',titleCase(r.status||'ACTIVE')];
+    if(type==='notifications')return [r.title||'',r.reference||'',r.createdAt?new Date(r.createdAt).toLocaleString('en-GB'):'',r.status||(r.isRead?'Read':'Unread')];
+    if(type==='payouts')return [r.ref||r.id||'',money(r.amount??r.supplierSettlement??0),r.destination||r.method||'—',titleCase(r.status||'')];
+    if(type==='reports')return [r.report||r.name||'',r.range||'',r.summary||'','Download'];
+    return Array.isArray(r)?r:[];
+  };
+  const fetchRows=async()=>{
+    if(type==='customers'){const r=await usersApi.getVendorCustomers();return (r.data||[]).map(normalizeRow);}
+    if(type==='promotions'){const r=await promotionsApi.getAll();return (r.data||[]).map(normalizeRow);}
+    if(type==='reviews'){const r=await reviewsApi.getVendorReviews();return (r.data||[]).map(normalizeRow);}
+    if(type==='shipping'){const r=await shippingApi.getMine();return (r.data||[]).map(normalizeRow);}
+    if(type==='notifications'){const r=await notificationsApi.getMine();return (r.data||[]).map(normalizeRow);}
+    if(type==='payouts'){const r=await payoutsApi.getHistory();return (r.data||r.payouts||[]).map(normalizeRow);}
+    return null;
+  };
+  useEffect(()=>{
+    let mounted=true;
+    (async()=>{
+      if(!hasToken())return;
+      try{
+        const next=await fetchRows();
+        if(next&&mounted&&next.length){setRows(next);localStorage.setItem(storageKey,JSON.stringify(next));}
+      }catch(e){/* fall back to local mock */if(mounted)console.warn(type,extractErrorMessage(e));}
+    })();
+    return ()=>{mounted=false;};
+  },[type]);
+
+  const filtered=useMemo(()=>rows.filter(r=>(Array.isArray(r)?r.join(' '):JSON.stringify(r)).toLowerCase().includes(q.toLowerCase())&&(!statusFilter||String(r[r.length-1])===statusFilter)),[rows,q,statusFilter]);
+  const per=6;const totalPages=Math.max(1,Math.ceil(filtered.length/per));const current=Math.min(page,totalPages);const shown=filtered.slice((current-1)*per,current*per);
+  const editable=['stores','promotions','team','shipping'].includes(type);
+  const add=()=>{
+    if(type==='team')setEditing({row:['New staff member','Sales Staff','Orders, Customers','Active'],new:true});
+    else if(type==='stores')setEditing({row:['New Store','Electronics','0','New','Pending'],new:true});
+    else if(type==='promotions')setEditing({row:['New promotion','CODE','10%','Draft','30 Sep 2026'],new:true});
+    else if(type==='shipping')setEditing({row:['New zone','0 RWF','1–3 days','Standard','Active'],new:true});
+  };
+  const persist=(next)=>{setRows(next);localStorage.setItem(storageKey,JSON.stringify(next));};
+  // Best-effort backend create for new promotions/zones (id not available for array rows).
+  const syncCreate=async(nextRow)=>{
+    if(!hasToken())return;
+    try{
+      if(type==='promotions')await promotionsApi.create({name:nextRow[0],code:nextRow[1],type:'PERCENT',status:nextRow[3]||'DRAFT'});
+      else if(type==='shipping')await shippingApi.create({name:nextRow[0],fee:parseFloat(String(nextRow[1]).replace(/[^0-9.]/g,''))||0,eta:nextRow[2],methods:['STANDARD']});
+    }catch(e){console.warn(type,extractErrorMessage(e));}
+  };
+  const saveEdit=async(nextRow,isNew,at)=>{const idx=Number.isInteger(at)?at:rows.findIndex(x=>x===at);const next=isNew?[nextRow,...rows]:idx>=0?rows.map((x,i)=>i===idx?nextRow:x):[nextRow,...rows.filter(x=>x!==at)];persist(next);(isNew&&['promotions','shipping'].includes(type))&&syncCreate(nextRow);setEditing(null);setPage(1);toast.success(c.title+' saved.')};
+  const exportCsv=()=>{const esc=v=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[c.headers.map(esc).join(','),...filtered.map(r=>r.map(esc).join(','))].join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`mvec-${type}-${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(url)};const statuses=[...new Set(rows.map(r=>String(r[r.length-1]??'')).filter(Boolean))];
+  return <><div className="dash-page-head"><div><span className="eyebrow">SELLER PLATFORM</span><h1>{c.title}</h1><p>{c.desc}</p></div>{editable&&<button className="gradient-btn" onClick={add}><Icon name="plus"/> Add {type==='team'?'staff member':type==='stores'?'store':type.slice(0,-1)}</button>}</div><div className="dash-toolbar"><div className="dash-filter"><Icon name="search"/><input value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} placeholder={`Search ${c.title.toLowerCase()}…`}/></div>{statuses.length>1&&<select className="table-filter-select" value={statusFilter} onChange={e=>{setStatusFilter(e.target.value);setPage(1)}}><option value="">All statuses</option>{statuses.map(x=><option key={x}>{x}</option>)}</select>}<button className="filter-btn" onClick={exportCsv}>Export CSV</button></div><div className="data-card"><div className="data-card-head"><div><h3>{c.title}</h3><span>{filtered.length} records</span></div><span className="muted">Marketplace records</span></div><div className="data-table"><div className={'data-row module-row '+(c.headers.length===4?'four':'')}>{c.headers.map(h=><span className="table-label" key={h}>{h}</span>)}{editable&&<span className="table-label">Actions</span>}</div>{shown.map((r,i)=><div className={'data-row module-row '+(c.headers.length===4?'four':'')} key={`${r[0]}-${i}`}>{r.map((v,j)=><span key={j}>{j===0?<b>{v}</b>:j===c.headers.length-1&&['Active','Completed','Processing','Pending','Scheduled','Unread','Read','Low stock','In stock','Out of stock'].includes(v)?<em className={'status '+(['Active','Completed','Read','In stock'].includes(v)?'active':'warning')}>{v}</em>:v}</span>)}{editable&&<span className="row-actions"><button title={`Edit ${c.title.toLowerCase()}`} onClick={()=>setEditing({row:[...r],index:rows.indexOf(r),new:false})}><Icon name="edit"/></button><button title="Delete record" onClick={()=>{const next=rows.filter(x=>x!==r);persist(next);toast.info('Record deleted.')}}><Icon name="trash"/></button></span>}</div>)}</div><Pagination page={current} setPage={setPage} total={filtered.length} perPage={per}/></div>{editing&&<EditRows type={type} headers={c.headers} rows={rows} value={editing.row} isNew={editing.new} onCancel={()=>setEditing(null)} onSave={row=>saveEdit(row,editing.new,editing.index)}/>}</>}
 
 const EDIT_ENUMS={
  'Status':['Active','Pending','Draft','Scheduled','Completed','Archived','Inactive','Out of stock'],

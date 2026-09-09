@@ -24,6 +24,9 @@ export function mapBackendProduct(p) {
     p.image ||
     PLACEHOLDER_IMG;
   const attrs = p.attributes || {};
+  const rawGallery = (p.media && p.media.gallery) || (Array.isArray(p.media) ? p.media : null) || p.images || [];
+  const gallery = [mainImage, ...(Array.isArray(rawGallery) ? rawGallery.filter(Boolean) : [])]
+    .filter((u, i, a) => u && a.indexOf(u) === i);
   return {
     id: p._id || p.id || p.publicId,
     name: p.name || '',
@@ -38,6 +41,7 @@ export function mapBackendProduct(p) {
     stock: Number(p.stockQuantity || 0),
     sku: p.sku || '',
     image: mainImage,
+    gallery: gallery.length ? gallery : [mainImage],
     description: p.description || p.shortDescription || '',
     status: p.status || 'ACTIVE',
     slug: p.slug || '',

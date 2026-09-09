@@ -37,4 +37,8 @@ export const ordersApi = {
     client.patch("/orders/vendor/status", payload).then((r) => r.data),
   confirmDelivery: (id, deliveryOtp) =>
     client.patch(`/orders/${id}/deliver`, { deliveryOtp }).then((r) => r.data),
+  getAllOrders: () =>
+    client.get("/orders").then((r) => r.data),
+  confirmPayment: (orderId, method = "MOMO") =>
+    client.post("/payments/confirm", { orderId, method }).then((r) => r.data),
 };

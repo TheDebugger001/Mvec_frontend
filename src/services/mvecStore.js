@@ -213,24 +213,7 @@ export function verifyDeliveryOtp(id, otp) {
 }
 
 export function syncOrderLifecycle() {
-  const orders = readOrdersRaw();
-  let changed = false;
-  const now = Date.now();
-  const next = orders.map(order => {
-    if (order.payment !== "SUCCESS" || order.settlementStatus !== "HELD" || order.deliveryOtpVerified) return order;
-    const paidAt = new Date(order.paidAt || 0).getTime();
-    if (!paidAt) return order;
-    const elapsed = now - paidAt;
-    if (elapsed >= DELIVERY_WINDOW_MS) {
-      changed = true;
-      return refundOrderInternal(order, "3-hour delivery deadline exceeded");
-    }
-    const progress = elapsed < 10*60*1000 ? "Payment confirmed" : elapsed < 30*60*1000 ? "Preparing" : elapsed < 60*60*1000 ? "Shipped" : elapsed < 120*60*1000 ? "In transit" : "Out for delivery";
-    const status = progress === "Payment confirmed" ? "Payment Confirmed" : progress;
-    if (order.deliveryStatus !== progress || order.status !== status) { changed = true; return {...order, deliveryStatus:progress, status}; }
-    return order;
-  });
-  if (changed) saveOrders(next);
+  // Manual vendor fulfillment lifecycle: statuses must NOT be auto-progressed by a timer.
   return readOrdersRaw();
 }
 
