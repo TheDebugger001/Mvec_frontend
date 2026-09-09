@@ -23,6 +23,8 @@ export const ordersApi = {
     };
     return client.post("/orders/checkout", body).then((r) => r.data);
   },
+  directCheckout: (payload) =>
+    client.post("/orders/direct-checkout", payload).then((r) => r.data),
   getMyOrders: () =>
     client.get("/orders/my-orders").then((r) => r.data),
   getVendorOrders: () =>

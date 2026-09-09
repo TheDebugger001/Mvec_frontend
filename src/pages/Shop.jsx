@@ -61,7 +61,7 @@ export default function Shop(){
     setSearchParams(next,{replace:false});
   };
 
-  const ranked=useMemo(()=>rankCatalogProducts(catalog,{q,cat,maxPrice:max}),[catalog,q,cat,max]);
+  const ranked=useMemo(()=>rankCatalogProducts(catalog,{q,category:cat,maxPrice:max}),[catalog,q,cat,max]);
   const {primary,related}=ranked;
   const ordered=useMemo(()=>sort==='price-low'?ranked.results.slice().sort((a,b)=>a.price-b.price):sort==='price-high'?ranked.results.slice().sort((a,b)=>b.price-a.price):sort==='rating'?ranked.results.slice().sort((a,b)=>(Number(b.rating)||0)-(Number(a.rating)||0)):ranked.results,[ranked,sort]);
   const total=ordered.length;

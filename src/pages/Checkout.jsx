@@ -4,7 +4,9 @@ import Storefront from "../components/Storefront";
 import {products} from "../data";
 import {useMarketplace} from "../context/MarketplaceContext";
 import {useAuth} from "../context/AuthContext";
-import {createOrder, snapshotOrderPricing} from "../services/mvecStore";
+import {snapshotOrderPricing} from "../services/mvecStore";
+import {ordersApi} from "../API/orders";
+import {extractErrorMessage} from "../API/client";
 import {useToast} from "../components/Toast";
 
 const money=n=>new Intl.NumberFormat("en-RW").format(Number(n)||0)+" RWF";
@@ -18,25 +20,30 @@ export default function Checkout(){
   const items=useMemo(()=>p?[{...p,qty:Number(params.get("qty")||1)}]:cart,[p,cart,params]);
   const [form,setForm]=useState({name:user?.fullName||"",phone:user?.telephone||"",email:user?.email||"",province:"Kigali City",district:"Gasabo",sector:"Remera",address:"KG 11 Ave, Kigali",method:"standard"});
   const [error,setError]=useState("");
+  const [submitting,setSubmitting]=useState(false);
   const subtotal=items.reduce((s,x)=>s+x.price*(x.qty||1),0);
   const shipping=form.province==="Kigali City"?0:(form.method==="express"?10000:5000);
   const pricing=snapshotOrderPricing(items,shipping,0,false);
   const total=pricing.buyerTotal;
   function update(e){setForm({...form,[e.target.name]:e.target.value});}
-  function continuePayment(e){
+  async function continuePayment(e){
     e.preventDefault(); setError("");
     if(!form.name||!form.phone||!form.address){setError("Please complete your name, phone number and delivery address.");toast.error("Please complete your name, phone number and delivery address.");return;}
     if(!items.length){setError("Your cart is empty.");toast.error("Your cart is empty.");return;}
-    const order=createOrder({
-      buyer:user?.fullName||form.name,buyerPhone:form.phone,buyerEmail:form.email||"",
-      vendor:items[0].vendor, items:items.map(x=>({productId:x.id,name:x.name,qty:x.qty,price:x.price,image:x.image,vendor:x.vendor})),
-      subtotal,shipping,total,address:form.address,province:form.province,district:form.district,sector:form.sector,deliveryMethod:form.method,
-      pricing, commission:pricing.mvecCommission, paymentMethod:null,
-      internalSettlement:{baseProductPrice:pricing.basePrice,mvecCommission:pricing.mvecCommission,deliveryAllocation:pricing.delivery,discount:pricing.discount,vendorSettlement:pricing.vendorSettlement}
-    });
-    if(!p) clearCart();
-    toast.success("Order created — continue to payment.");
-    navigate(`/payment/${order.id}`);
+    setSubmitting(true);
+    try{
+      const res=await ordersApi.directCheckout({
+        items:items.map(x=>({productId:x.productId||x.id,name:x.name,qty:x.qty,price:x.price,vendor:x.vendor})),
+        shippingAddress:{street:form.address,city:form.district,state:form.province,country:"Rwanda",postalCode:""},
+        paymentMethod:"MOMO",
+      });
+      if(!p) clearCart();
+      toast.success("Order created — continue to payment.");
+      navigate(`/payment/${res.order._id}`);
+    }catch(err){
+      const msg=extractErrorMessage(err);
+      setError(msg);toast.error(msg);setSubmitting(false);
+    }
   }
   return <Storefront><main className="checkout-page">
     <div className="page-title"><span className="eyebrow">CHECKOUT</span><h1>Complete your order</h1><p>Simple phone-first checkout with protected MVEC settlement.</p></div>
@@ -53,7 +60,7 @@ export default function Checkout(){
       </div>
       <div className="form-card"><h2>Order items</h2>{items.map(x=><div className="mini-item" key={x.id}><img src={x.image} alt=""/><div><b>{x.name}</b><span>{x.vendor} · Qty {x.qty}</span></div><strong>{money(x.price*x.qty)}</strong></div>)}</div>
     </section><aside className="summary-card"><h2>Order summary</h2><div><span>Products</span><b>{money(subtotal)}</b></div><div><span>Shipping</span><b>{money(shipping)}</b></div><div><span>Platform fees</span><b>Included where applicable</b></div><hr/><div className="grand"><span>Grand total</span><strong>{money(total)}</strong></div>
-      <button className="gradient-btn full" type="submit">Continue to payment</button><Link to="/cart" className="back-link">← Back to cart</Link>
+      <button className="gradient-btn full" type="submit" disabled={submitting}>{submitting?"Placing order…":"Continue to payment"}</button><Link to="/cart" className="back-link">← Back to cart</Link>
       <div className="verified-box"><b>✓ Clear payment flow</b><p>Your payment is processed through an appropriate payment partner. In the protected workflow, funds are recorded as HELD until delivery is confirmed.</p></div>
     </aside></div></form>
   </main></Storefront>
