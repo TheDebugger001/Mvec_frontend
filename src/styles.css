@@ -7178,3 +7178,38 @@ button:disabled {
     max-width: none;
   }
 }
+/* Role switcher */
+.role-switcher{position:relative}
+.role-switcher-btn{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e9ec;border-radius:7px;padding:7px 14px;font:600 13px Manrope;color:#34404b;cursor:pointer}
+.role-switcher-btn svg{width:15px;height:15px;color:#7c8890}
+.role-switcher-btn span{white-space:nowrap}
+.role-switcher-dropdown{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid #e5e9ec;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.1);min-width:160px;z-index:100;padding:4px}
+.role-option{display:block;width:100%;text-align:left;padding:9px 14px;border:0;background:none;font:600 13px Manrope;color:#34404b;border-radius:6px;cursor:pointer}
+.role-option:hover{background:#f3f6f9}
+.role-option.active{background:#ebf2ff;color:#2563eb}
+/* Search dropdown */
+.search-dropdown{position:absolute;left:0;top:calc(100% + 4px);background:#fff;border:1px solid #e5e9ec;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.1);width:100%;z-index:100;padding:4px}
+.search-result{display:block;padding:10px 14px;border-radius:6px;text-decoration:none;color:#34404b}
+.search-result:hover{background:#f3f6f9}
+.search-result b{display:block;font:600 13px Manrope;color:#34404b}
+.search-result small{font:400 11px Manrope;color:#7c8890}
+/* Dashboard header actions - ensure links styled as icon buttons */
+.dash-header-actions a{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:7px;color:#68767e;text-decoration:none}
+.dash-header-actions a:hover{background:#f3f6f9}
+.dash-header-actions .mini-avatar{width:34px;height:34px;border-radius:50%;overflow:hidden;background:#eef1f3;display:flex;align-items:center;justify-content:center;font:700 13px Manrope;color:#2563eb;text-decoration:none}
+.dash-header-actions .mini-avatar img{width:100%;height:100%;object-fit:cover}
+/* Search dropdown positioned relative to search */
+.dash-search{position:relative}
+/* Dark mode role switcher */
+[data-theme="dark"] .role-switcher-btn{background:#181d25;border-color:#2a3040;color:#d4d8dd}
+[data-theme="dark"] .role-switcher-dropdown{background:#181d25;border-color:#2a3040}
+[data-theme="dark"] .role-option{color:#d4d8dd}
+[data-theme="dark"] .role-option:hover{background:#222832}
+[data-theme="dark"] .role-option.active{background:#1a2744;color:#5b9aff}
+[data-theme="dark"] .search-dropdown{background:#181d25;border-color:#2a3040}
+[data-theme="dark"] .search-result{color:#d4d8dd}
+[data-theme="dark"] .search-result:hover{background:#222832}
+[data-theme="dark"] .search-result b{color:#d4d8dd}
+[data-theme="dark"] .search-result small{color:#7c8890}
+[data-theme="dark"] .dash-header-actions a{color:#9aa5aa}
+[data-theme="dark"] .dash-header-actions a:hover{background:#222832}

@@ -1,50 +1,375 @@
-import {useMemo,useState} from "react";
-import {useToast} from "../components/Toast";
-import {Link,useLocation} from "react-router-dom";
-import DashboardLayout from "../components/DashboardLayout";
-import Icon from "../components/Icon";
-import Pagination from "../components/Pagination";
-import SmartTable from "../components/SmartTable";
-import {products} from "../data";
-import {getAffiliateWallet,requestAffiliateWithdrawal} from "../services/mvecStore";
+import {useState,useMemo} from 'react';
+import {useLocation} from 'react-router-dom';
+import DashboardLayout from '../components/DashboardLayout';
+import Icon from '../components/Icon';
+import TabGroup,{Modal} from '../components/TabGroup';
+import SmartTable from '../components/SmartTable';
+import {products} from '../data';
+import {getAffiliateWallet,requestAffiliateWithdrawal} from '../services/mvecStore';
+import {useToast} from '../components/Toast';
 
-const KEY="mvec_affiliate_links";
+const KEY='mvec_affiliate_links';
 const read=()=>{try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch{return[]}};
 const write=links=>localStorage.setItem(KEY,JSON.stringify(links));
-const money=n=>new Intl.NumberFormat("en-RW").format(Number(n)||0)+" RWF";
+const money=n=>new Intl.NumberFormat('en-RW').format(Number(n)||0)+' RWF';
 const affiliateUrl=l=>`${window.location.origin}/product/${l.productId}?ref=${l.code}`;
 async function copyText(text){if(navigator.clipboard?.writeText)return navigator.clipboard.writeText(text);const el=document.createElement('textarea');el.value=text;document.body.appendChild(el);el.select();document.execCommand('copy');el.remove();}
 
-function Overview(){const wallet=getAffiliateWallet();return <><div className="dash-page-head"><div><span className="eyebrow">AFFILIATE PLATFORM</span><h1>Affiliate dashboard</h1><p>Promote MVEC products and earn when qualifying orders are completed.</p></div></div><div className="metric-grid"><div className="metric"><div className="metric-icon"><Icon name="chart"/></div><div><span>Clicks</span><strong>8,420</strong><small>+18.2%</small></div></div><div className="metric"><div className="metric-icon"><Icon name="cart"/></div><div><span>Completed orders</span><strong>184</strong><small>2.18% conversion</small></div></div><div className="metric"><div className="metric-icon"><Icon name="wallet"/></div><div><span>Pending commission</span><strong>{money(wallet.pending)}</strong><small>Awaiting completion</small></div></div><div className="metric"><div className="metric-icon"><Icon name="wallet"/></div><div><span>Available wallet</span><strong>{money(wallet.available)}</strong><small>Minimum withdrawal RWF 10,000</small></div></div></div><div className="verified-box"><b>✓ Protected commission workflow</b><p>Commission follows purchase → payment → delivery → refund window → confirmation. Once available, it moves into your wallet. You can request a withdrawal from RWF 10,000 upward.</p></div></>}
+// ─── SEED DATA ────────────────────────────────────────────────────────────────
+const seedConversions=[
+  {id:'CONV-001',order:'ORD-1008',product:'Wireless Headphones',sale:68000,commission:1360,status:'Completed',date:'2026-08-26'},
+  {id:'CONV-002',order:'ORD-1012',product:'Smart Watch Active',sale:99000,commission:1980,status:'Pending',date:'2026-08-25'},
+  {id:'CONV-003',order:'ORD-1019',product:'Portable Blender',sale:42000,commission:840,status:'Completed',date:'2026-08-24'},
+  {id:'CONV-004',order:'ORD-1025',product:'ProBook 14 Laptop',sale:780000,commission:15600,status:'Completed',date:'2026-08-23'},
+];
+const seedWallet={totalEarned:420000,available:285000,pending:135000,history:[
+  {id:'COM-001',source:'Completed order',reference:'ORD-1008',amount:1360,status:'Available',date:'2026-08-26'},
+  {id:'COM-002',source:'Completed order',reference:'ORD-1019',amount:840,status:'Available',date:'2026-08-24'},
+  {id:'COM-003',source:'Awaiting completion',reference:'ORD-1012',amount:1980,status:'Pending',date:'2026-08-25'},
+]};
+const seedTopLinks=[
+  {product:'Wireless Headphones',clicks:2450,conversions:42,commission:8400},
+  {product:'Smart Watch Active',clicks:1820,conversions:28,commission:5600},
+  {product:'ProBook 14 Laptop',clicks:980,conversions:12,commission:2400},
+];
 
-function Products(){
- const [links,setLinks]=useState(read());const [q,setQ]=useState('');const [page,setPage]=useState(1);const [copied,setCopied]=useState('');const perPage=6;
- const filtered=useMemo(()=>products.filter(p=>`${p.name} ${p.vendor||''} ${p.category||''}`.toLowerCase().includes(q.trim().toLowerCase())),[q]);
- const safePage=Math.min(page,Math.max(1,Math.ceil(filtered.length/perPage)));const shown=filtered.slice((safePage-1)*perPage,safePage*perPage);
- const make=p=>{const existing=links.find(l=>String(l.productId)===String(p.id));if(existing)return existing;const l={id:`AFF-${Date.now()}`,productId:p.id,product:p.name,code:`MV${p.id}${Date.now().toString().slice(-4)}`,clicks:0,orders:0,commission:2,amount:0,createdAt:new Date().toISOString()};const n=[l,...links];setLinks(n);write(n);return l;};
- const copyFor=async p=>{const l=links.find(x=>String(x.productId)===String(p.id))||make(p);await copyText(affiliateUrl(l));setCopied(String(p.id));setTimeout(()=>setCopied(''),1600)};
- return <><div className="dash-page-head"><div><span className="eyebrow">AFFILIATE PRODUCTS</span><h1>Choose products to promote</h1><p>Search the marketplace, confirm available stock and create a unique promotion link.</p></div></div><div className="dash-toolbar"><div className="dash-filter"><Icon name="search"/><input value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} placeholder="Search products, vendors or categories…"/></div><span className="table-count">{filtered.length} products</span></div><div className="dash-grid affiliate-product-grid">{shown.map(p=>{const hasLink=links.find(l=>String(l.productId)===String(p.id));return <div className="data-card" key={p.id}><div className="admin-product-main"><img src={p.image} alt=""/><div><b>{p.name}</b><small>{money(p.price)} · {p.vendor}</small></div></div><div className="affiliate-product-meta"><span>Available stock <b>{Number(p.stock||0)} units</b></span><span>Commission <b>2%</b></span></div><div className="affiliate-link-actions"><button className="gradient-btn" onClick={()=>make(p)} disabled={!!hasLink}>{hasLink?'Link created':'Create affiliate link'}</button>{hasLink&&<button className="outline-btn copy-link-btn" onClick={()=>copyFor(p)}><Icon name="copy" size={15}/>{copied===String(p.id)?'Copied':'Copy link'}</button>}</div></div>})}</div>{!shown.length&&<div className="data-card table-empty">No products match your search.</div>}<Pagination page={safePage} setPage={setPage} total={filtered.length} perPage={perPage}/></>
+// ─── REUSABLE ─────────────────────────────────────────────────────────────────
+
+function Metric({label,value,icon,sub}){
+  return <div className="metric"><div className="metric-icon"><Icon name={icon}/></div><div><span>{label}</span><strong>{value}</strong>{sub&&<small>{sub}</small>}</div></div>;
 }
 
-function Links(){
- const [links]=useState(read());
- const rows=links.map(l=>{const p=products.find(x=>String(x.id)===String(l.productId));const amount=Number(l.amount ?? (Number(l.orders||0)*Number(p?.price||0)));return {...l,amount};});
- const total=rows.reduce((sum,r)=>sum+Number(r.amount||0),0);
- const display=rows.length?[...rows,{id:'AFF-TOTAL',product:'Total amount generated',isTotal:true,amount:total}]:[];
- return <><div className="dash-page-head"><div><span className="eyebrow">MY LINKS</span><h1>Affiliate links</h1><p>Track links, conversions and the sales value generated from your marketing.</p></div></div><div className="data-card"><SmartTable columns={[{key:'product',label:'Product',render:r=>r.isTotal?<b className="affiliate-total-label">Total amount generated</b>:r.product},{key:'link',label:'Link',render:r=>r.isTotal?'—':<small>{affiliateUrl(r)}</small>},{key:'clicks',label:'Clicks',render:r=>r.isTotal?'—':r.clicks},{key:'orders',label:'Orders',render:r=>r.isTotal?'—':r.orders},{key:'commission',label:'Commission',render:r=>r.isTotal?'—':<b>{r.commission}%</b>},{key:'amount',label:'Amount generated',render:r=><b>{money(r.amount)}</b>}]} rows={display} rowKey={r=>r.id} searchPlaceholder="Search affiliate links…" empty="No links yet." exportName="affiliate-links"/></div></>
+function StatusBadge({status}){
+  const cls=['Active','Available','Completed','Success'].includes(status)?'active':
+             ['Suspended','Blocked','Cancelled','Failed'].includes(status)?'danger':
+             ['Pending','Processing','Draft'].includes(status)?'warning':'';
+  return <em className={'status '+cls}>{status}</em>;
 }
 
-function Earnings(){const rows=[{period:"01/08/2026 – 31/08/2026",sales:"184",commission:"RWF 420,000",status:"Available"},{period:"01/08/2026 – 31/08/2026",sales:"22",commission:"RWF 180,000",status:"Pending"}];return <><div className="dash-page-head"><div><span className="eyebrow">EARNINGS</span><h1>Commission</h1><p>Transparent affiliate earnings. Periods use D/M/Y dates.</p></div></div><div className="data-card"><SmartTable columns={[{key:'period',label:'Period'},{key:'sales',label:'Completed sales'},{key:'commission',label:'Commission'},{key:'status',label:'Status',render:r=><em className={'status '+(r.status==='Available'?'active':'warning')}>{r.status}</em>}]} rows={rows} rowKey={r=>r.period+r.status} searchPlaceholder="Search commission…"/></div></>}
-
-function Wallet(){
- const wallet=getAffiliateWallet();
- const movements=[{id:'COM-2026-0184',source:'Completed order',reference:'MVEC-ORD-0184',amount:1360,status:'Available',date:'31/08/2026'},{id:'COM-2026-0183',source:'Completed order',reference:'MVEC-ORD-0183',amount:1980,status:'Available',date:'30/08/2026'},{id:'COM-2026-0182',source:'Order awaiting completion',reference:'MVEC-ORD-0182',amount:840,status:'Pending',date:'30/08/2026'}];
- return <><div className="dash-page-head"><div><span className="eyebrow">AFFILIATE WALLET</span><h1>Wallet</h1><p>View your commission balance and wallet activity.</p></div><Link className="gradient-btn" to="/affiliate/withdrawals">Request withdrawal</Link></div><div className="metric-grid"><div className="metric"><div className="metric-icon"><Icon name="chart"/></div><div><span>Total earned</span><strong>{money(wallet.totalEarned)}</strong><small>Lifetime commission</small></div></div><div className="metric"><div className="metric-icon"><Icon name="wallet"/></div><div><span>Available balance</span><strong>{money(wallet.available)}</strong><small>Ready for withdrawal</small></div></div><div className="metric"><div className="metric-icon"><Icon name="wallet"/></div><div><span>Pending commission</span><strong>{money(wallet.pending)}</strong><small>Awaiting qualifying completion</small></div></div></div><div className="data-card"><h3>Wallet activity</h3><SmartTable columns={[{key:'id',label:'Entry'},{key:'source',label:'Source'},{key:'reference',label:'Reference'},{key:'amount',label:'Amount',render:r=>money(r.amount)},{key:'status',label:'Status',render:r=><em className={'status '+(r.status==='Available'?'active':'warning')}>{r.status}</em>},{key:'date',label:'Date'}]} rows={movements} rowKey={r=>r.id} searchPlaceholder="Search wallet activity…" exportName="affiliate-wallet-activity"/></div></>
+function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
+  const [sortKey,setSortKey]=useState(null);
+  const [sortDir,setSortDir]=useState('asc');
+  const [q,setQ]=useState('');
+  const [page,setPage]=useState(1);
+  const per=8;
+  
+  const filtered=useMemo(()=>{
+    let result=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
+    if(sortKey){
+      result=[...result].sort((a,b)=>{
+        const va=a[sortKey],vb=b[sortKey];
+        const cmp=typeof va==='number'?va-vb:String(va||'').localeCompare(String(vb||''));
+        return sortDir==='asc'?cmp:-cmp;
+      });
+    }
+    return result;
+  },[rows,q,sortKey,sortDir]);
+  
+  const totalPages=Math.max(1,Math.ceil(filtered.length/per));
+  const current=Math.min(page,totalPages);
+  const shown=filtered.slice((current-1)*per,current*per);
+  
+  return (
+    <div className="data-card">
+      <div className="data-card-head">
+        <div className="dash-toolbar" style={{width:'100%'}}>
+          <div className="dash-filter"><Icon name="search"/><input value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} placeholder="Search…"/></div>
+          <span className="table-count">{filtered.length} records</span>
+        </div>
+      </div>
+      <div className="data-table">
+        <div className="data-row table-header">
+          {columns.map(col=>(
+            <span key={col.key} className="table-label sortable" onClick={()=>{if(sortKey===col.key)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(col.key);setSortDir('asc');}}}>
+              {col.label}{sortKey===col.key&&(sortDir==='asc'?' ↑':' ↓')}
+            </span>
+          ))}
+          {actions&&<span className="table-label">Actions</span>}
+        </div>
+        {shown.length===0?(
+          <div className="data-row table-empty">{emptyText}</div>
+        ):shown.map((r,i)=>(
+          <div className="data-row" key={rowKey?rowKey(r,i):i}>
+            {columns.map(col=>(<span key={col.key}>{col.render?col.render(r):r[col.key]}</span>))}
+            {actions&&<span className="row-actions">{actions(r)}</span>}
+          </div>
+        ))}
+      </div>
+      {totalPages>1&&(
+        <div className="pagination">
+          <button disabled={current<=1} onClick={()=>setPage(p=>p-1)}>←</button>
+          <span>Page {current} of {totalPages}</span>
+          <button disabled={current>=totalPages} onClick={()=>setPage(p=>p+1)}>→</button>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function Withdrawals(){const [wallet,setWallet]=useState(getAffiliateWallet());const [amount,setAmount]=useState(wallet.available);const [method,setMethod]=useState("MTN MoMo");const [account,setAccount]=useState("+250 788 100 005");const toast=useToast();const submit=()=>{try{requestAffiliateWithdrawal(amount,method,account);setWallet(getAffiliateWallet());setAmount(0);toast.success(`Withdrawal request for ${money(amount)} submitted successfully.`)}catch(e){toast.error(e.message)}};return <><div className="dash-page-head"><div><span className="eyebrow">AFFILIATE PAYOUTS</span><h1>Withdrawals</h1><p>Request a payout and track the status of previous withdrawal requests.</p></div><Link className="outline-btn" to="/affiliate/wallet">View wallet</Link></div><div className="wallet-grid"><div className="data-card"><h3>Request a withdrawal</h3><p className="tiny">Available balance: <b>{money(wallet.available)}</b>. Minimum withdrawal is RWF 10,000.</p><label className="field"><span>Amount (RWF)</span><input type="number" min="10000" step="1000" value={amount} onChange={e=>setAmount(e.target.value)}/></label><label className="field"><span>Payment method</span><select value={method} onChange={e=>setMethod(e.target.value)}><option>MTN MoMo</option><option>Airtel Money</option><option>Bank account</option></select></label><label className="field"><span>Account / phone</span><input value={account} onChange={e=>setAccount(e.target.value)}/></label><button className="gradient-btn" onClick={submit} disabled={wallet.available<10000}>Submit withdrawal request</button></div><div className="data-card"><h3>Payout process</h3><div className="timeline">{['Submit a withdrawal request.','MVEC validates the destination and available balance.','The payout is processed through the selected payment channel.','The request status changes to completed when the transfer is confirmed.'].map((x,i)=><div className="timeline-item done" key={x}><i/><div><b>{i+1}. {x}</b></div></div>)}</div></div></div><div className="data-card"><h3>Withdrawal history</h3><SmartTable columns={[{key:'id',label:'Request'},{key:'amount',label:'Amount',render:r=>money(r.amount)},{key:'method',label:'Method'},{key:'account',label:'Destination'},{key:'requestedAt',label:'Requested',render:r=>new Date(r.requestedAt).toLocaleDateString('en-GB')},{key:'status',label:'Status'}]} rows={wallet.withdrawals||[]} rowKey={r=>r.id} searchPlaceholder="Search withdrawals…" empty="No withdrawal requests yet." exportName="affiliate-withdrawals"/></div></>}
+// ─── AFFILIATE OVERVIEW ───────────────────────────────────────────────────────
 
-function Profile(){const [name,setName]=useState('Affiliate Marketer');const [phone,setPhone]=useState('+250 788 100 005');const toast=useToast();return <><div className="dash-page-head"><div><span className="eyebrow">AFFILIATE PROFILE</span><h1>Profile</h1><p>Manage your affiliate account and contact information.</p></div></div><div className="profile-grid"><div className="data-card"><div className="profile-avatar-wrap"><div className="profile-avatar">{name.charAt(0)||'A'}</div></div><h2>{name}</h2><p className="muted">Affiliate marketer · MVEC verified account</p><span className="role-chip">Affiliate</span></div><div className="data-card"><h3>Account details</h3><label className="field"><span>Full name</span><input value={name} onChange={e=>setName(e.target.value)}/></label><label className="field"><span>Phone number</span><input value={phone} onChange={e=>setPhone(e.target.value)}/></label><label className="field"><span>Email</span><input defaultValue="affiliate@mvec.rw" type="email"/></label><label className="field"><span>Preferred marketing channel</span><select defaultValue="WhatsApp"><option>WhatsApp</option><option>Facebook</option><option>Instagram</option><option>TikTok</option><option>Website</option></select></label><button className="gradient-btn" onClick={()=>toast.success('Profile updated successfully.')}>Save profile</button></div></div></>}
-function Conversions(){const rows=[{order:'ORD-1008',product:'Wireless Headphones',sale:'RWF 68,000',commission:'RWF 1,360',status:'Completed'},{order:'ORD-1012',product:'Smart Watch Active',sale:'RWF 99,000',commission:'RWF 1,980',status:'Pending'},{order:'ORD-1019',product:'Portable Blender',sale:'RWF 42,000',commission:'RWF 840',status:'Completed'}];return <><div className="dash-page-head"><div><span className="eyebrow">CONVERSIONS</span><h1>Conversions</h1><p>Track customers and orders generated from your affiliate links.</p></div></div><div className="data-card"><SmartTable columns={[{key:'order',label:'Order'},{key:'product',label:'Product'},{key:'sale',label:'Sale'},{key:'commission',label:'Commission'},{key:'status',label:'Status'}]} rows={rows} rowKey={r=>r.order} searchPlaceholder="Search conversions…"/></div></>}
-function AffiliateDashboard(){const path=useLocation().pathname;let page=path.includes('/products')?<Products/>:path.includes('/links')?<Links/>:path.includes('/conversions')?<Conversions/>:path.includes('/earnings')?<Earnings/>:path.includes('/withdrawals')?<Withdrawals/>:path.includes('/wallet')?<Wallet/>:path.includes('/profile')?<Profile/>:<Overview/>;return <DashboardLayout>{page}</DashboardLayout>}
-export default AffiliateDashboard;
+function AffiliateOverview(){
+  const [tab,setTab]=useState('conversions');
+  const wallet=getAffiliateWallet();
+  const [links]=useState(read());
+  
+  const recentConversions=seedConversions.slice(0,5);
+  const topLinks=links.length?links.map(l=>{
+    const p=products.find(x=>String(x.id)===String(l.productId));
+    return {...l,productName:p?.name||'Unknown',amount:Number(l.amount||(Number(l.orders||0)*Number(p?.price||0)))};
+  }).sort((a,b)=>b.amount-a.amount).slice(0,5):seedTopLinks;
+
+  const conversionColumns=[
+    {key:'order',label:'Order'},{key:'product',label:'Product'},
+    {key:'sale',label:'Sale',render:r=>money(r.sale)},{key:'commission',label:'Commission',render:r=>money(r.commission)},
+    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},{key:'date',label:'Date'},
+  ];
+  const linkColumns=[
+    {key:'productName',label:'Product'},{key:'clicks',label:'Clicks'},
+    {key:'conversions',label:'Conversions'},{key:'commission',label:'Commission %',render:r=>r.commission?`${r.commission}%`:'2%'},
+    {key:'amount',label:'Generated',render:r=>money(r.amount)},
+  ];
+
+  const getTabData=()=>{
+    switch(tab){
+      case 'topLinks':return {columns:linkColumns,rows:topLinks};
+      default:return {columns:conversionColumns,rows:recentConversions};
+    }
+  };
+  const {columns,rows}=getTabData();
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">AFFILIATE PLATFORM</span>
+          <h1>Affiliate Dashboard</h1>
+          <p>Promote MVEC products and earn when qualifying orders are completed.</p>
+        </div>
+      </div>
+
+      <div className="metric-grid">
+        <Metric label="Total Clicks" value="8,420" icon="chart" sub="+18.2% this period"/>
+        <Metric label="Conversions" value="184" icon="cart" sub="2.18% conversion rate"/>
+        <Metric label="Pending Earnings" value={money(wallet.pending)} icon="wallet" sub="Awaiting completion"/>
+        <Metric label="Lifetime Earned" value={money(wallet.totalEarned)} icon="wallet" sub="All time commission"/>
+      </div>
+
+      <div className="verified-box"><b>✓ Protected commission workflow</b><p>Commission follows purchase → payment → delivery → refund window → confirmation. Once available, it moves into your wallet.</p></div>
+
+      <TabGroup tabs={[{key:'conversions',label:'Recent Conversions',count:recentConversions.length},{key:'topLinks',label:'Top Performing Links',count:topLinks.length}]} activeTab={tab} onTabChange={setTab}/>
+      
+      <DataTable columns={columns} rows={rows} rowKey={r=>r.id||r.order||r.product}/>
+    </>
+  );
+}
+
+// ─── AFFILIATE WALLET ─────────────────────────────────────────────────────────
+
+function AffiliateWallet(){
+  const toast=useToast();
+  const [wallet]=useState(seedWallet);
+  const [withdrawModal,setWithdrawModal]=useState(false);
+  const [amount,setAmount]=useState(wallet.available);
+  const [method,setMethod]=useState('MTN MoMo');
+  const [account,setAccount]=useState('+250 788 100 005');
+
+  const submitWithdrawal=()=>{
+    if(amount<10000){toast.error('Minimum withdrawal is RWF 10,000.');return;}
+    if(amount>wallet.available){toast.error('Insufficient balance.');return;}
+    toast.success(`Withdrawal of ${money(amount)} requested.`);
+    setWithdrawModal(false);
+  };
+
+  const txnColumns=[
+    {key:'id',label:'Entry'},{key:'source',label:'Source'},{key:'reference',label:'Reference'},
+    {key:'amount',label:'Amount',render:r=>money(r.amount)},{key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
+    {key:'date',label:'Date'},
+  ];
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">AFFILIATE PLATFORM</span>
+          <h1>Wallet</h1>
+          <p>Commission balance and wallet activity.</p>
+        </div>
+        <button className="gradient-btn" onClick={()=>setWithdrawModal(true)}>Request Withdrawal</button>
+      </div>
+
+      <div className="metric-grid">
+        <Metric label="Total Earned" value={money(wallet.totalEarned)} icon="chart" sub="Lifetime commission"/>
+        <Metric label="Available Balance" value={money(wallet.available)} icon="wallet" sub="Ready for withdrawal"/>
+        <Metric label="Pending Commission" value={money(wallet.pending)} icon="wallet" sub="Awaiting completion"/>
+      </div>
+
+      <DataTable columns={txnColumns} rows={wallet.history} rowKey={r=>r.id} emptyText="No wallet activity."/>
+
+      <Modal open={withdrawModal} onClose={()=>setWithdrawModal(false)} title="WITHDRAWAL" subtitle="Request a payout">
+        <p>Available balance: <b>{money(wallet.available)}</b>. Minimum withdrawal is RWF 10,000.</p>
+        <label className="field"><span>Amount (RWF)</span><input type="number" min="10000" step="1000" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></label>
+        <label className="field"><span>Payment method</span><select value={method} onChange={e=>setMethod(e.target.value)}><option>MTN MoMo</option><option>Airtel Money</option><option>Bank account</option></select></label>
+        <label className="field"><span>Account / phone</span><input value={account} onChange={e=>setAccount(e.target.value)}/></label>
+        <div className="modal-actions">
+          <button className="outline-btn" onClick={()=>setWithdrawModal(false)}>Cancel</button>
+          <button className="gradient-btn" onClick={submitWithdrawal} disabled={wallet.available<10000}>Submit Request</button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+// ─── AFFILIATE VENDORS & SUPPLIERS ────────────────────────────────────────────
+
+function AffiliateVendors(){
+  const [links,setLinks]=useState(read());
+  const [copied,setCopied]=useState('');
+  const [q,setQ]=useState('');
+  
+  const filteredProducts=useMemo(()=>products.filter(p=>`${p.name} ${p.vendor||''} ${p.category||''}`.toLowerCase().includes(q.toLowerCase())),[q]);
+  
+  const createLink=(product)=>{
+    const existing=links.find(l=>String(l.productId)===String(product.id));
+    if(existing)return existing;
+    const link={id:`AFF-${Date.now()}`,productId:product.id,product:product.name,code:`MV${product.id}${Date.now().toString().slice(-4)}`,clicks:0,orders:0,commission:2,amount:0,createdAt:new Date().toISOString()};
+    const next=[link,...links];
+    setLinks(next);
+    write(next);
+    return link;
+  };
+
+  const copyFor=async(product)=>{
+    const link=links.find(l=>String(l.productId)===String(product.id))||createLink(product);
+    await copyText(affiliateUrl(link));
+    setCopied(String(product.id));
+    setTimeout(()=>setCopied(''),1600);
+  };
+
+  const columns=[
+    {key:'name',label:'Product',render:r=>(
+      <div className="admin-product-main">
+        <img src={r.image} alt=""/>
+        <div><b>{r.name}</b><small>{money(r.price)} · {r.vendor}</small></div>
+      </div>
+    )},
+    {key:'category',label:'Category'},
+    {key:'stock',label:'Stock',render:r=>`${r.stock} units`},
+    {key:'commission',label:'Commission',render:()=><b>2%</b>},
+  ];
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">AFFILIATE PLATFORM</span>
+          <h1>Vendors & Suppliers</h1>
+          <p>Generate referral links for marketplace products.</p>
+        </div>
+      </div>
+
+      <div className="dash-toolbar">
+        <div className="dash-filter"><Icon name="search"/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search products, vendors or categories…"/></div>
+        <span className="table-count">{filteredProducts.length} products</span>
+      </div>
+
+      <div className="dash-grid affiliate-product-grid">
+        {filteredProducts.slice(0,12).map(product=>{
+          const hasLink=links.find(l=>String(l.productId)===String(product.id));
+          return (
+            <div className="data-card" key={product.id}>
+              <div className="admin-product-main">
+                <img src={product.image} alt=""/>
+                <div><b>{product.name}</b><small>{money(product.price)} · {product.vendor}</small></div>
+              </div>
+              <div className="affiliate-product-meta">
+                <span>Stock <b>{product.stock} units</b></span>
+                <span>Commission <b>2%</b></span>
+              </div>
+              <div className="affiliate-link-actions">
+                <button className="gradient-btn" onClick={()=>createLink(product)} disabled={!!hasLink}>{hasLink?'Link Created':'Create Link'}</button>
+                {hasLink&&<button className="outline-btn copy-link-btn" onClick={()=>copyFor(product)}><Icon name="copy" size={15}/>{copied===String(product.id)?'Copied!':'Copy Link'}</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// ─── AFFILIATE REPORTS ────────────────────────────────────────────────────────
+
+function AffiliateReports(){
+  const [dateRange,setDateRange]=useState('30');
+  const [tab,setTab]=useState('clicks');
+  
+  const clicksData=[
+    {date:'2026-08-26',clicks:342,conversions:8,rate:'2.34%'},
+    {date:'2026-08-25',clicks:287,conversions:6,rate:'2.09%'},
+    {date:'2026-08-24',clicks:412,conversions:12,rate:'2.91%'},
+    {date:'2026-08-23',clicks:198,conversions:4,rate:'2.02%'},
+  ];
+  const auditLog=[
+    {id:'AUD-001',event:'Commission earned',reference:'ORD-1008',amount:'RWF 1,360',date:'2026-08-26'},
+    {id:'AUD-002',event:'Link clicked',reference:'REF-MV1-ABC',amount:'—',date:'2026-08-26'},
+    {id:'AUD-003',event:'Conversion recorded',reference:'ORD-1012',amount:'RWF 1,980',date:'2026-08-25'},
+  ];
+  const accountNotices=[
+    {message:'Account verified and in good standing',status:'Active',date:'2026-08-20'},
+    {message:'No fraud flags detected',status:'Clear',date:'2026-08-20'},
+  ];
+
+  const clickColumns=[
+    {key:'date',label:'Date'},{key:'clicks',label:'Clicks'},{key:'conversions',label:'Conversions'},
+    {key:'rate',label:'Conversion Rate'},
+  ];
+  const auditColumns=[
+    {key:'id',label:'ID'},{key:'event',label:'Event'},{key:'reference',label:'Reference'},
+    {key:'amount',label:'Amount'},{key:'date',label:'Date'},
+  ];
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">AFFILIATE PLATFORM</span>
+          <h1>Reports</h1>
+          <p>Click-through analytics, conversion audits and account status.</p>
+        </div>
+        <select className="period-select" value={dateRange} onChange={e=>setDateRange(e.target.value)}>
+          <option value="7">Last 7 Days</option><option value="30">Last 30 Days</option><option value="90">Last 3 Months</option>
+        </select>
+      </div>
+
+      <div className="metric-grid">
+        <Metric label="Click-through Rate" value="3.2%" icon="chart" sub="Average CTR"/>
+        <Metric label="Conversion Rate" value="2.18%" icon="cart" sub="Orders / Clicks"/>
+        <Metric label="Revenue Generated" value="RWF 989,000" icon="wallet" sub="Total referred sales"/>
+      </div>
+
+      <TabGroup tabs={[{key:'clicks',label:'Click Analytics'},{key:'audit',label:'Conversion Audit'},{key:'account',label:'Account Status'}]} activeTab={tab} onTabChange={setTab}/>
+
+      {tab==='clicks'&&<DataTable columns={clickColumns} rows={clicksData} rowKey={r=>r.date}/>}
+      {tab==='audit'&&<DataTable columns={auditColumns} rows={auditLog} rowKey={r=>r.id}/>}
+      {tab==='account'&&(
+        <div className="data-card">
+          {accountNotices.map((n,i)=>(
+            <div className="activity-row" key={i}><div><b>{n.message}</b><small>{n.date}</small></div><StatusBadge status={n.status}/></div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── MAIN AFFILIATE DASHBOARD ─────────────────────────────────────────────────
+
+export default function AffiliateDashboard(){
+  const path=useLocation().pathname;
+  
+  if(path.includes('/wallet'))return <DashboardLayout><AffiliateWallet/></DashboardLayout>;
+  if(path.includes('/vendors'))return <DashboardLayout><AffiliateVendors/></DashboardLayout>;
+  if(path.includes('/reports'))return <DashboardLayout><AffiliateReports/></DashboardLayout>;
+  return <DashboardLayout><AffiliateOverview/></DashboardLayout>;
+}

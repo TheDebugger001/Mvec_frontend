@@ -6,6 +6,7 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [viewAs, setViewAs] = useState(() => localStorage.getItem('mvec_view_as') || null);
 
   const loadMe = useCallback(async () => {
     const token = localStorage.getItem('huska_token');
@@ -56,15 +57,31 @@ export function AuthProvider({ children }) {
 
   function logout() {
     localStorage.removeItem('huska_token');
+    localStorage.removeItem('mvec_view_as');
     setUser(null);
+    setViewAs(null);
   }
+
+  function switchRole(role) {
+    if (user?.role === 'super_admin') {
+      if (role === 'super_admin') {
+        localStorage.removeItem('mvec_view_as');
+        setViewAs(null);
+      } else {
+        localStorage.setItem('mvec_view_as', role);
+        setViewAs(role);
+      }
+    }
+  }
+
+  const effectiveRole = viewAs || user?.role || null;
 
   async function refresh() {
     return user;
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, googleLogin, resetPassword, logout, refresh, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, googleLogin, resetPassword, logout, refresh, setUser, viewAs, switchRole, effectiveRole }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,10 +1,199 @@
-import {useState} from 'react';import {Link,useLocation,useNavigate} from 'react-router-dom';import {useAuth} from '../context/AuthContext';import {useTheme} from '../context/ThemeContext';import Icon from './Icon';
+import {useState,useEffect,useRef} from 'react';
+import {Link,useLocation,useNavigate} from 'react-router-dom';
+import {useAuth} from '../context/AuthContext';
+import {useTheme} from '../context/ThemeContext';
+import Icon from './Icon';
 import {products,vendors} from '../data';
+
 const _navState={};
-export default function DashboardLayout({admin=false,children}){const {user,logout}=useAuth(),loc=useLocation(),navigate=useNavigate(),{theme,toggleTheme}=useTheme();const roleKey=user?.role||(admin?'admin':'default');const [open,setOpen]=useState(false);const [search,setSearch]=useState('');const [openGroups,setOpenGroups]=useState(()=>_navState[roleKey]||{});const avatar=localStorage.getItem('mvec_profile_image')||'';
-const seller={groups:[{name:'Overview',icon:'grid',items:[['/vendor','Dashboard','grid']]},{name:'Store',icon:'shop',items:[['/vendor/stores','My Store','shop'],['/vendor/products','Products','box'],['/vendor/categories','Categories','tag'],['/vendor/inventory','Inventory','grid']]},{name:'Orders',icon:'cart',items:[['/vendor/orders','Orders','cart'],['/vendor/purchases','Purchases','cart'],['/vendor/shipping','Shipping','shop'],['/vendor/delivery','Delivery & Settlement','box']]},{name:'Growth',icon:'users',items:[['/vendor/customers','Customers','users'],['/vendor/suppliers','Find Suppliers','shop'],['/vendor/affiliates','Affiliate Marketing','users'],['/vendor/reviews','Reviews','heart']]},{name:'Marketing',icon:'tag',items:[['/vendor/advertisements','Advertisements','tag'],['/vendor/promotions','Promotions','tag']]},{name:'Finance',icon:'wallet',items:[['/vendor/payouts','Payouts','wallet'],['/vendor/transactions','Transactions','wallet'],['/vendor/refunds','Refunds','wallet'],['/vendor/subscription','Subscription','wallet']]},{name:'Insights',icon:'chart',items:[['/vendor/analytics','Analytics','chart'],['/vendor/reports','Reports','chart']]},{name:'Communications',icon:'bell',items:[['/vendor/messages','Messages','users'],['/vendor/notifications','Notifications','bell'],['/vendor/team','Team / Staff','users']]},{name:'Management',icon:'settings',items:[['/vendor/settings','Settings','settings'],['/vendor/support','MVEC Support','bell']]}]};
-const adminItems={groups:[{name:'Activity',icon:'chart',items:[['/admin','Overview','grid'],['/admin/analytics','Analytics','chart'],['/admin/reports','Reports','chart'],['/admin/recommendations','Recommendations','chart'],['/admin/trust','Trust Scores','chart'],['/admin/audit-logs','Audit Logs','box']]},{name:'Commerce',icon:'shop',items:[['/admin/orders','Orders','cart'],['/admin/products','Products','box'],['/admin/categories','Categories','tag'],['/admin/deliveries','Deliveries','box']]},{name:'Finance',icon:'wallet',items:[['/admin/ledger','Financial Ledger','wallet'],['/admin/payments','Payments','wallet'],['/admin/transactions','Transactions','wallet'],['/admin/commissions','Commissions','wallet'],['/admin/refunds','Refunds','wallet']]},{name:'Growth',icon:'users',items:[['/admin/supplier-acquisition','Supplier Acquisition','users'],['/admin/vendor-acquisition','Vendor Acquisition','users'],['/admin/advertising','Advertising','tag'],['/admin/subscriptions','Subscriptions','wallet'],['/admin/matching','Supplier Matching','users']]},{name:'People',icon:'users',items:[['/admin/users','Users','users'],['/admin/vendors','Vendors','shop'],['/admin/suppliers','Suppliers','shop'],['/admin/affiliates','Affiliates','users']]},{name:'Governance',icon:'shield',items:[['/admin/commission-rules','Commission Rules','wallet'],['/admin/risk','Fraud & Risk','bell'],['/admin/disputes','Disputes','bell'],['/admin/security','Security','settings']]},{name:'Communications',icon:'bell',items:[['/admin/messages','Messages','users'],['/admin/notifications','Notifications','bell']]},{name:'Platform',icon:'settings',items:[['/admin/languages','Languages','grid'],['/admin/locations','Locations','shop'],['/admin/system','System Administration','settings'],['/admin/settings','Settings','settings'],['/admin/support','MVEC Support','bell']]}]};
-const supplier={groups:[{name:'Overview',icon:'grid',items:[['/supplier','Dashboard','grid']]},{name:'Catalog',icon:'box',items:[['/supplier/products','Wholesale Products','box'],['/supplier/inventory','Inventory','grid']]},{name:'Orders',icon:'cart',items:[['/supplier/orders','Vendor Orders','cart'],['/supplier/supply-requests','Supply Requests','cart'],['/supplier/delivery','Delivery & Settlement','box']]},{name:'Finance',icon:'wallet',items:[['/supplier/payments','Payments','wallet'],['/supplier/transactions','Transactions','wallet']]},{name:'Insights',icon:'chart',items:[['/supplier/analytics','Analytics','chart'],['/supplier/reports','Reports','chart'],['/supplier/reviews','Reviews','heart']]},{name:'Communications',icon:'bell',items:[['/supplier/messages','Messages','users'],['/supplier/notifications','Notifications','bell'],['/supplier/team','Team / Staff','users']]},{name:'Management',icon:'settings',items:[['/supplier/settings','Settings','settings'],['/supplier/support','MVEC Support','bell']]}]};
-const affiliate={groups:[{name:'Overview',icon:'grid',items:[['/affiliate','Dashboard','grid']]},{name:'Campaigns',icon:'tag',items:[['/affiliate/products','Promote Products','box'],['/affiliate/links','My Links','tag'],['/affiliate/conversions','Conversions','chart']]},{name:'Earnings',icon:'wallet',items:[['/affiliate/earnings','Earnings','wallet'],['/affiliate/wallet','Wallet','wallet'],['/affiliate/withdrawals','Withdrawals','wallet']]},{name:'Account',icon:'shield',items:[['/affiliate/fraud','Fraud Protection','bell'],['/affiliate/profile','Profile','user']]},{name:'Communications',icon:'bell',items:[['/affiliate/messages','Messages','users'],['/affiliate/notifications','Notifications','bell']]},{name:'Management',icon:'settings',items:[['/affiliate/support','MVEC Support','bell']]}]};
-const delivery={groups:[{name:'Overview',icon:'grid',items:[['/delivery','Dashboard','grid']]},{name:'Deliveries',icon:'box',items:[['/delivery/deliveries','My Deliveries','box'],['/delivery/history','History','chart']]},{name:'Finance',icon:'wallet',items:[['/delivery/earnings','Earnings','wallet']]},{name:'Communications',icon:'bell',items:[['/delivery/messages','Messages','users']]},{name:'Management',icon:'settings',items:[['/delivery/settings','Settings','settings']]}]};
-const role=user?.role;const items=admin?adminItems:role==='supplier'?supplier:role==='affiliate'?affiliate:role==='delivery'?delivery:seller;const searchResults=search.trim()?[...products.filter(p=>`${p.name} ${p.brand||''} ${p.vendor||''} ${p.category||''}`.toLowerCase().includes(search.toLowerCase())).slice(0,4),...vendors.filter(v=>`${v.name} ${v.category}`.toLowerCase().includes(search.toLowerCase())).slice(0,2)]:[];const goGlobalSearch=()=>{if(search.trim())navigate(`/shop?q=${encodeURIComponent(search.trim())}`)};return <div className={'dashboard-shell '+(open?'sidebar-open':'')}><aside className="dashboard-sidebar"><div className="dash-logo"><Link to="/">MVEC</Link><span>{admin?'ADMIN CONTROL':role==='supplier'?'SUPPLIER PLATFORM':role==='affiliate'?'AFFILIATE PLATFORM':role==='delivery'?'DELIVERY PLATFORM':'SELLER PLATFORM'}</span></div><div className="dash-user"><div className="dash-avatar">{avatar?<img src={avatar} alt="Profile"/>:(user?.fullName?.[0]||'M')}</div><div><b>{user?.fullName||'MVEC User'}</b><small>{admin?'Super Administrator':role==='supplier'?'Supplier account':role==='affiliate'?'Affiliate account':role==='delivery'?'Delivery partner':'Vendor account'}</small></div></div><nav>{items.groups?items.groups.map((g,gi)=>{const inGroup=g.items.some(([href])=>loc.pathname===href);const expanded=openGroups[gi];return <div className={'sidebar-group'+(expanded?' open':'')} key={g.name}><button className={'sidebar-group-header'+(inGroup?' active':'')} onClick={()=>setOpenGroups(o=>{const n={...o,[gi]:!o[gi]};_navState[roleKey]=n;return n})}><Icon name={g.icon}/><span>{g.name}</span><Icon name="chevron"/></button>{expanded&&<div className="sidebar-group-items">{g.items.map(([href,label,icon])=><Link onClick={()=>setOpen(false)} className={loc.pathname===href?'active':''} key={href} to={href}><Icon name={icon}/><span>{label}</span></Link>)}</div>}</div>}):items.map(([href,label,icon])=><Link onClick={()=>setOpen(false)} className={loc.pathname===href?'active':''} key={href} to={href}><Icon name={icon}/><span>{label}</span></Link>)}</nav><div className="dash-bottom"><Link to="/"><Icon name="home"/> View marketplace</Link><button onClick={()=>{logout();navigate('/')}}><Icon name="logout"/> Sign out</button></div></aside><section className="dashboard-main"><header className="dash-header"><button className="mobile-menu" onClick={()=>setOpen(v=>!v)}><Icon name="menu"/></button><div className="dash-search-wrap"><div className="dash-search"><Icon name="search"/><input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>e.key==='Enter'&&goGlobalSearch()} placeholder="Search…"/></div>{search.trim()&&<div className="dash-global-results">{searchResults.map((r,i)=><Link key={`${r.id}-${i}`} to={r.image?`/product/${r.id}`:`/vendors/${r.id}`} onClick={()=>setSearch('')}><span>{r.name}</span><small>{r.category||r.vendor}</small></Link>)}{!searchResults.length&&<div className="search-no-results">No matching results</div>}<button type="button" className="search-view-all" onClick={goGlobalSearch}>View all results</button></div>}</div><div className="dash-header-actions"><button className="theme-toggle" onClick={toggleTheme} title="Toggle theme"><Icon name={theme==='dark'?'sun':'moon'} size={18}/></button><Link className="dashboard-bell" to={role==='supplier'?'/supplier/notifications':role==='vendor'?'/vendor/notifications':role==='affiliate'?'/affiliate/notifications':admin?'/admin/notifications':'/'}><Icon name="bell"/></Link><Link to="/profile"><div className="mini-avatar">{avatar?<img src={avatar} alt="Profile"/>:(user?.fullName?.[0]||'M')}</div></Link></div></header><div className="dash-content">{children}</div></section></div>}
+
+export default function DashboardLayout({admin=false,children}){
+  const {user,logout,effectiveRole,switchRole}=useAuth();
+  const loc=useLocation();
+  const navigate=useNavigate();
+  const {theme,toggleTheme}=useTheme();
+  const displayRole=admin?'super_admin':effectiveRole||user?.role||'default';
+  const roleKey=displayRole;
+  const [open,setOpen]=useState(false);
+  const [search,setSearch]=useState('');
+  const [openGroups,setOpenGroups]=useState(()=>_navState[roleKey]||{});
+  const [roleDropdown,setRoleDropdown]=useState(false);
+  const avatar=localStorage.getItem('mvec_profile_image')||'';
+  const roleRef=useRef(null);
+
+  useEffect(()=>{
+    if(!roleDropdown)return;
+    const handler=(e)=>{
+      if(roleRef.current&&!roleRef.current.contains(e.target))setRoleDropdown(false);
+    };
+    document.addEventListener('mousedown',handler);
+    return()=>document.removeEventListener('mousedown',handler);
+  },[roleDropdown]);
+
+  // MINIMAL NAVIGATION: Only 4-5 items per role
+  const adminItems={groups:[
+    {name:'Main',icon:'grid',items:[['/admin','Overview','grid'],['/admin/wallet','Wallet & Ledger','wallet'],['/admin/users','Users & Stores','users'],['/admin/reports','Reports & Cases','chart']]}
+  ]};
+
+  const seller={groups:[
+    {name:'Main',icon:'grid',items:[['/vendor','Overview','grid'],['/vendor/wallet','Wallet','wallet'],['/vendor/suppliers','Suppliers','shop'],['/vendor/products','Products','box'],['/vendor/reports','Reports','chart']]}
+  ]};
+
+  const supplier={groups:[
+    {name:'Main',icon:'grid',items:[['/supplier','Overview','grid'],['/supplier/wallet','Wallet','wallet'],['/supplier/vendors','Vendors','users'],['/supplier/products','Products','box'],['/supplier/reports','Reports','chart']]}
+  ]};
+
+  const affiliate={groups:[
+    {name:'Main',icon:'grid',items:[['/affiliate','Overview','grid'],['/affiliate/wallet','Wallet','wallet'],['/affiliate/vendors','Partners','users'],['/affiliate/reports','Reports','chart']]}
+  ]};
+
+  const delivery={groups:[
+    {name:'Main',icon:'grid',items:[['/delivery','Overview','grid'],['/delivery/deliveries','My Deliveries','box'],['/delivery/earnings','Earnings','wallet'],['/delivery/messages','Messages','users']]}
+  ]};
+
+  const role=displayRole;
+  const items=admin&&displayRole!=='super_admin'?adminItems:role==='supplier'?supplier:role==='affiliate'?affiliate:role==='delivery'?delivery:role==='super_admin'?adminItems:seller;
+
+  const searchResults=search.trim()
+    ?[...products.filter(p=>`${p.name} ${p.brand||''} ${p.vendor||''} ${p.category||''}`.toLowerCase().includes(search.toLowerCase())).slice(0,4),
+      ...vendors.filter(v=>`${v.name} ${v.category}`.toLowerCase().includes(search.toLowerCase())).slice(0,2)]
+    :[];
+
+  const goGlobalSearch=()=>{
+    if(search.trim())navigate(`/shop?q=${encodeURIComponent(search.trim())}`);
+  };
+
+  return (
+    <div className={'dashboard-shell '+(open?'sidebar-open':'')}>
+      <aside className="dashboard-sidebar">
+        <div className="dash-logo">
+          <Link to="/">MVEC</Link>
+          <span>{admin?'ADMIN CONTROL':role==='supplier'?'SUPPLIER PLATFORM':role==='affiliate'?'AFFILIATE PLATFORM':role==='delivery'?'DELIVERY PLATFORM':'SELLER PLATFORM'}</span>
+        </div>
+
+        <nav>
+          {items.groups?items.groups.map((g,gi)=>{
+            const inGroup=g.items.some(([href])=>loc.pathname===href);
+            const expanded=openGroups[gi]||inGroup;
+            return (
+              <div className={'sidebar-group'+(expanded?' open':'')} key={g.name}>
+                <button
+                  className={'sidebar-group-header'+(inGroup?' active':'')}
+                  onClick={()=>setOpenGroups(o=>{const n={...o,[gi]:!o[gi]};_navState[roleKey]=n;return n})}
+                >
+                  <Icon name={g.icon}/>
+                  <span>{g.name}</span>
+                  <Icon name="chevron"/>
+                </button>
+                {expanded&&(
+                  <div className="sidebar-group-items">
+                    {g.items.map(([href,label,icon])=>(
+                      <Link
+                        onClick={()=>setOpen(false)}
+                        className={loc.pathname===href?'active':''}
+                        key={href}
+                        to={href}
+                      >
+                        <Icon name={icon}/>
+                        <span>{label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }):items.map(([href,label,icon])=>(
+            <Link
+              onClick={()=>setOpen(false)}
+              className={loc.pathname===href?'act':''}
+              key={href}
+              to={href}
+            >
+              <Icon name={icon}/>
+              <span>{label}</span>
+            </Link>
+          ))}
+        </nav>
+
+        <div className="sidebar-footer">
+          <button className="sidebar-footer-btn" onClick={toggleTheme}>
+            <Icon name={theme==='dark'?'sun':'moon'}/>
+            <span>{theme==='dark'?'Light mode':'Dark mode'}</span>
+          </button>
+          <button className="sidebar-footer-btn" onClick={()=>{logout();navigate('/login')}}>
+            <Icon name="logout"/>
+            <span>Logout</span>
+          </button>
+        </div>
+      </aside>
+
+      <main className="dashboard-main">
+        <div className="dash-header">
+          <button className="mobile-menu" onClick={()=>setOpen(!open)}>
+            <Icon name="menu"/>
+          </button>
+          <div className="dash-search">
+            <Icon name="search"/>
+            <input
+              value={search}
+              onChange={e=>setSearch(e.target.value)}
+              onKeyDown={e=>e.key==='Enter'&&goGlobalSearch()}
+              placeholder="Search products, vendors, orders…"
+            />
+            {searchResults.length>0&&(
+              <div className="search-dropdown">
+                {searchResults.map(p=>(
+                  <Link
+                    key={p.id||p.name}
+                    to={p.sku?`/product/${p.id}`:`/vendors/${p.id}`}
+                    className="search-result"
+                    onClick={()=>setSearch('')}
+                  >
+                    <b>{p.name}</b>
+                    <small>{p.category||p.brand||''}</small>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="dash-header-actions">
+            {user?.role==='super_admin'&&(
+              <div className="role-switcher" ref={roleRef}>
+                <button className="role-switcher-btn" onClick={()=>setRoleDropdown(!roleDropdown)}>
+                  <Icon name="users"/>
+                  <span>{displayRole==='super_admin'?'Admin':displayRole==='vendor'?'Vendor':displayRole==='supplier'?'Supplier':displayRole==='affiliate'?'Affiliate':'Delivery'}</span>
+                  <Icon name="chevron"/>
+                </button>
+                {roleDropdown&&(
+                  <div className="role-switcher-dropdown">
+                    {['super_admin','vendor','supplier','affiliate'].map(r=>(
+                      <button
+                        key={r}
+                        className={'role-option'+(displayRole===r?' active':'')}
+                        onClick={()=>{switchRole(r);setRoleDropdown(false);navigate(r==='super_admin'?'/admin':`/${r}`)}}
+                      >
+                        {r==='super_admin'?'Admin':r.charAt(0).toUpperCase()+r.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <Link to={`${loc.pathname}/notifications`}>
+              <Icon name="bell"/>
+            </Link>
+            <Link to={`${loc.pathname}/messages`}>
+              <Icon name="users"/>
+            </Link>
+            <Link className="mini-avatar" to="/profile">
+              {avatar?<img src={avatar} alt=""/>:(user?.fullName?.[0]||'M')}
+            </Link>
+          </div>
+        </div>
+        <div className="dash-content">
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}

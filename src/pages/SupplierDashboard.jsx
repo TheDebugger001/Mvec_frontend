@@ -1,24 +1,436 @@
-import {useState} from "react";
-import {useLocation} from "react-router-dom";
-import DashboardLayout from "../components/DashboardLayout";
-import Icon from "../components/Icon";
-import SmartTable from "../components/SmartTable";
-import {useToast} from "../components/Toast";
-import DeliveryTracking from "../components/DeliveryTracking";
-import NotificationPanel from "../components/NotificationPanel";
-import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from "../services/analytics";
-import {products as seed} from "../data";
-const KEY="mvec_supplier_products"; const read=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}}; const money=n=>new Intl.NumberFormat("en-RW").format(Number(n)||0)+" RWF";
-const seeded=seed.slice(0,6).map((p,i)=>({...p,id:`SUP-${p.id}`,wholesalePrice:Math.round(p.price*.82),moq:i%2?5:10,bulkDiscount:i%2?5:8}));
-function SupplierProducts(){const [rows,setRows]=useState(()=>read(KEY).length?read(KEY):seeded),[edit,setEdit]=useState(null);const toast=useToast();const save=p=>{const next=edit?.id?rows.map(x=>x.id===p.id?p:x):[{...p,id:`SUP-${Date.now()}`},...rows];setRows(next);localStorage.setItem(KEY,JSON.stringify(next));setEdit(null);toast.success(edit?.id?'Wholesale product saved.':'Wholesale product added.')};return <><div className="dash-page-head"><div><span className="eyebrow">SUPPLIER PLATFORM</span><h1>Wholesale products</h1><p>Manage products that vendors can buy in bulk.</p></div><button className="gradient-btn" onClick={()=>setEdit({name:"",category:"Electronics",wholesalePrice:0,moq:1,stock:0,bulkDiscount:0,description:""})}><Icon name="plus"/> Add wholesale product</button></div><div className="data-card"><SmartTable columns={[{key:'name',label:'Product',render:r=><div className="admin-product-main"><img src={r.image||seed[0].image} alt=""/><div><b>{r.name}</b><small>{r.category} · MOQ {r.moq}</small></div></div>},{key:'wholesalePrice',label:'Wholesale price',render:r=><b>{money(r.wholesalePrice)}</b>},{key:'stock',label:'Stock'},{key:'bulkDiscount',label:'Bulk discount',render:r=>`${r.bulkDiscount}%`},{key:'status',label:'Status',render:r=> <em className={'status '+(Number(r.stock)>0?'active':'warning')}>{Number(r.stock)>0?'Available':'Out of stock'}</em>}]} rows={rows} rowKey={r=>r.id} searchPlaceholder="Search wholesale products…" actions={r=><><button onClick={()=>setEdit(r)} title="Edit"><Icon name="edit"/></button><button onClick={()=>{const n=rows.filter(x=>x.id!==r.id);setRows(n);localStorage.setItem(KEY,JSON.stringify(n));toast.info('Product deleted.')}} title="Delete"><Icon name="trash"/></button></>}/></div>{edit&&<SupplierForm value={edit} onCancel={()=>setEdit(null)} onSave={save}/>}</>}
-function SupplierForm({value,onCancel,onSave}){const [f,setF]=useState(value);const u=e=>setF({...f,[e.target.name]:e.target.value});return <div className="modal-backdrop supplier-product-modal"><div className="modal supplier-form-modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" onClick={onCancel}>×</button><h2>{value.id?"Edit":"Add"} wholesale product</h2><p>Enter the wholesale product details vendors will see when sourcing stock.</p>{["name","category","wholesalePrice","moq","stock","bulkDiscount","description"].map(n=><label className="field" key={n}><span>{n==="moq"?"Minimum order quantity":n==="wholesalePrice"?"Wholesale price (RWF)":n.replace(/([A-Z])/g," $1")}</span>{n==="description"?<textarea name={n} value={f[n]||""} onChange={u}/>:<input name={n} type={["wholesalePrice","moq","stock","bulkDiscount"].includes(n)?"number":"text"} value={f[n]??""} onChange={u} required/>}</label>)}<div className="modal-actions"><button className="outline-btn" onClick={onCancel}>Cancel</button><button className="gradient-btn" onClick={()=>onSave(f)}>Save</button></div></div></div>}
-function SupplierOverview(){return <><div className="dash-page-head"><div><span className="eyebrow">SUPPLIER PLATFORM</span><h1>Supplier dashboard</h1><p>Supply verified MVEC vendors with wholesale products.</p></div></div><div className="metric-grid"><div className="metric"><div className="metric-icon"><Icon name="box"/></div><div><span>Wholesale products</span><strong>126</strong><small>Active catalog</small></div></div><div className="metric"><div className="metric-icon"><Icon name="cart"/></div><div><span>Vendor orders</span><strong>84</strong><small>This month</small></div></div><div className="metric"><div className="metric-icon"><Icon name="chart"/></div><div><span>Sales</span><strong>RWF 8.4M</strong><small>+12.6%</small></div></div><div className="metric"><div className="metric-icon"><Icon name="wallet"/></div><div><span>Protected funds</span><strong>RWF 3.68M</strong><small>Held by MVEC pending delivery</small></div></div></div><div className="verified-box"><b>🔒 MVEC protected settlement</b><p>When a vendor pays a supplier through the MVEC workflow, the amount is recorded as HELD. Fulfill the supply, confirm receipt/delivery, and MVEC releases the protected amount according to the marketplace rules.</p></div></>}
-function SupplierOrders(){const rows=[{order:"B2B-2001",vendor:"Kigali Tech Store",total:"RWF 2,200,000",payment:"SUCCESS",status:"Ready for delivery",settlement:"HELD"},{order:"B2B-2002",vendor:"Smart Hub Rwanda",total:"RWF 1,480,000",payment:"SUCCESS",status:"In transit",settlement:"HELD"},{order:"B2B-2003",vendor:"Urban Closet",total:"RWF 860,000",payment:"PENDING",status:"Awaiting payment",settlement:"PENDING"}];return <><div className="dash-page-head"><div><span className="eyebrow">B2B ORDERS</span><h1>Vendor orders</h1><p>Manage wholesale orders and see payment protection.</p></div></div><div className="data-card"><SmartTable columns={[{key:'order',label:'Order'},{key:'vendor',label:'Vendor'},{key:'total',label:'Total'},{key:'payment',label:'Payment'},{key:'status',label:'Supply status'},{key:'settlement',label:'Funds',render:r=><em className={'status '+(r.settlement==='HELD'?'warning':'active')}>{r.settlement}</em>}]} rows={rows} rowKey={r=>r.order} searchPlaceholder="Search vendor orders…"/></div></>}
-function SupplierInventory(){const rows=seeded.slice(0,8).map((p,i)=>({...p,available:Math.max(0,Number(p.stock)+(i*7)),reserved:[12,8,16,5,11,7,4,9][i]}));return <><div className="dash-page-head"><div><span className="eyebrow">INVENTORY</span><h1>Inventory</h1><p>Monitor wholesale stock levels and restocking needs.</p></div></div><div className="metric-grid"><div className="metric"><div className="metric-icon"><Icon name="box"/></div><div><span>Total stock units</span><strong>1,842</strong><small>Across 126 products</small></div></div><div className="metric"><div className="metric-icon"><Icon name="grid"/></div><div><span>Low stock</span><strong>14</strong><small>Needs attention</small></div></div><div className="metric"><div className="metric-icon"><Icon name="cart"/></div><div><span>Reserved</span><strong>286</strong><small>For vendor orders</small></div></div></div><div className="data-card"><SmartTable columns={[{key:'name',label:'Product',render:r=><div className="admin-product-main"><img src={r.image} alt=""/><div><b>{r.name}</b><small>{r.sku} · MOQ {r.moq}</small></div></div>},{key:'available',label:'Available'},{key:'reserved',label:'Reserved'},{key:'moq',label:'MOQ'},{key:'status',label:'Status',render:r=><em className={'status '+(r.available<10?'warning':'active')}>{r.available<10?'Low stock':'In stock'}</em>}]} rows={rows} rowKey={r=>r.id} searchPlaceholder="Search inventory…"/></div></>}
-function SupplierAnalytics(){const [period,setPeriod]=useState("30 Days");const chart=getPeriodChart(period);const labels=getPeriodLabels(period);const metrics=getPeriodMetrics(period);const rows=seeded.map((p,i)=>({product:p.name,orders:[42,31,26,19,14,11][i],sales:[2140000,1860000,1320000,940000,720000,510000][i]}));return <><div className="dash-page-head"><div><span className="eyebrow">ANALYTICS</span><h1>Analytics</h1><p>Understand wholesale sales, vendor demand and product performance.</p></div><select className="period-select" value={period} onChange={e=>setPeriod(e.target.value)}><option>Today</option><option>7 Days</option><option>30 Days</option><option>3 Months</option><option>6 Months</option><option>1 Year</option></select></div><div className="metric-grid"><div className="metric"><div className="metric-icon"><Icon name="chart"/></div><div><span>Monthly sales</span><strong>{money(Math.round(metrics.sales*.455))}</strong><small>{period} wholesale sales</small></div></div><div className="metric"><div className="metric-icon"><Icon name="cart"/></div><div><span>Orders</span><strong>{Math.max(1,Math.round(metrics.orders*.26))}</strong><small>{period} vendor orders</small></div></div><div className="metric"><div className="metric-icon"><Icon name="users"/></div><div><span>Buying vendors</span><strong>{metrics.activeVendors}</strong><small>{period} active vendors</small></div></div></div><div className="data-card large-chart"><div className="data-card-head"><h3>Wholesale performance</h3><span>{period}</span></div><div className="fake-chart">{chart.map((h,i)=><div key={i} style={{height:h+"%"}}><span>{labels[i]}</span></div>)}</div></div><div className="data-card"><SmartTable columns={[{key:'product',label:'Product'},{key:'orders',label:'Orders'},{key:'sales',label:'Sales',render:r=>money(r.sales)}]} rows={rows} rowKey={r=>r.product} searchPlaceholder="Search analytics…"/></div></>}
-function SupplierPayments(){const rows=[{ref:'PAY-88421',vendor:'Kigali Tech Store',amount:'RWF 2,200,000',supplierSettlement:'RWF 2,200,000',status:'HELD',release:'After delivery'},{ref:'PAY-88422',vendor:'Smart Hub Rwanda',amount:'RWF 1,480,000',supplierSettlement:'RWF 1,480,000',status:'HELD',release:'After delivery'},{ref:'PAY-88423',vendor:'Urban Closet',amount:'RWF 860,000',supplierSettlement:'RWF 860,000',status:'PENDING',release:'Awaiting payment'}];return <><div className="dash-page-head"><div><span className="eyebrow">PAYMENTS</span><h1>Payments</h1><p>See vendor payments, protected funds and the full amount due to your supplier account.</p></div></div><div className="verified-box"><b>🔒 Full supplier settlement</b><p>MVEC does not charge commission on supplier transactions. Paid supply orders remain HELD until successful fulfillment and vendor receipt confirmation, then the full supplier amount is released.</p></div><div className="data-card"><SmartTable columns={[{key:'ref',label:'Reference'},{key:'vendor',label:'Vendor'},{key:'amount',label:'Vendor paid'},{key:'supplierSettlement',label:'Supplier settlement'},{key:'status',label:'Payment',render:r=><em className={'status '+(r.status==='HELD'?'warning':'active')}>{r.status}</em>},{key:'release',label:'Release'}]} rows={rows} rowKey={r=>r.ref} searchPlaceholder="Search payments…" exportName="supplier-payments"/></div></>}
-function SupplierReports(){const rows=[{report:'Wholesale sales',period:'01/08/2026 – 31/08/2026',summary:'RWF 8,400,000'},{report:'Vendor orders',period:'01/08/2026 – 31/08/2026',summary:'84 orders'},{report:'Inventory',period:'31/08/2026',summary:'1,842 units'},{report:'Protected settlements',period:'01/08/2026 – 31/08/2026',summary:'RWF 3,680,000 held'}];return <><div className="dash-page-head"><div><span className="eyebrow">REPORTS</span><h1>Reports</h1><p>Review supplier performance and protected settlements.</p></div></div><div className="data-card"><SmartTable columns={[{key:'report',label:'Report'},{key:'period',label:'Period'},{key:'summary',label:'Summary'}]} rows={rows} rowKey={r=>r.report} searchPlaceholder="Search reports…"/></div></>}
-function SupplierTeam(){const [staff,setStaff]=useState([{id:1,name:'Eric Manager',role:'Order Manager',phone:'+250 788 111 222'},{id:2,name:'Aline Finance',role:'Accountant',phone:'+250 788 111 333'}]);const [name,setName]=useState('');const [role,setRole]=useState('Staff');const toast=useToast();const add=()=>{if(!name.trim())return;setStaff([...staff,{id:Date.now(),name,role,phone:'Not added'}]);setName('');toast.success('Staff member added.');};return <><div className="dash-page-head"><div><span className="eyebrow">TEAM / STAFF</span><h1>Team & staff</h1><p>Give trusted staff access to supplier operations.</p></div></div><div className="data-card"><SmartTable columns={[{key:'name',label:'Member'},{key:'role',label:'Role'},{key:'phone',label:'Phone'}]} rows={staff} rowKey={r=>r.id} searchPlaceholder="Search staff…" actions={r=><button className="outline-btn" onClick={()=>setStaff(staff.filter(y=>y.id!==r.id))}>Remove</button>}/><div className="form-row" style={{marginTop:20}}><label className="field"><span>Name</span><input value={name} onChange={e=>setName(e.target.value)} placeholder="Staff name"/></label><label className="field"><span>Role</span><select value={role} onChange={e=>setRole(e.target.value)}><option>Staff</option><option>Product Manager</option><option>Order Manager</option><option>Accountant</option></select></label><button className="gradient-btn" onClick={add}>Add staff</button></div></div></>}
-function SupplierSettings(){const initial={name:'Rwanda Wholesale Electronics',phone:'+250 788 100 004',delivery:'2-4'};const [settings,setSettings]=useState(()=>read('mvec_supplier_settings',initial));const toast=useToast();const u=(k,v)=>setSettings(s=>({...s,[k]:v}));const save=()=>{localStorage.setItem('mvec_supplier_settings',JSON.stringify(settings));toast.success('Settings saved successfully.')};return <><div className="dash-page-head"><div><span className="eyebrow">SETTINGS</span><h1>Settings</h1><p>Manage supplier profile and marketplace preferences.</p></div></div><div className="data-card"><h3>Supplier profile</h3><label className="field"><span>Business name</span><input value={settings.name} onChange={e=>u('name',e.target.value)}/></label><label className="field"><span>Phone</span><input value={settings.phone} onChange={e=>u('phone',e.target.value)}/></label><label className="field"><span>Default delivery time</span><select value={settings.delivery} onChange={e=>u('delivery',e.target.value)}><option value="1-2">1–2 business days</option><option value="2-4">2–4 business days</option><option value="5-7">5–7 business days</option></select></label><button className="gradient-btn" onClick={save}>Save changes</button></div></>}
-function SupplierDashboard(){const path=useLocation().pathname;let page;if(path.includes('/products'))page=<SupplierProducts/>;else if(path.includes('/orders'))page=<SupplierOrders/>;else if(path.includes('/inventory'))page=<SupplierInventory/>;else if(path.includes('/analytics'))page=<SupplierAnalytics/>;else if(path.includes('/payments'))page=<SupplierPayments/>;else if(path.includes('/reports'))page=<SupplierReports/>;else if(path.includes('/team'))page=<SupplierTeam/>;else if(path.includes('/delivery'))page=<DeliveryTracking role="supplier"/>;else if(path.includes('/notifications'))page=<NotificationPanel role="supplier" recipient="Rwanda Wholesale Suppliers"/>;else if(path.includes('/settings'))page=<SupplierSettings/>;else page=<SupplierOverview/>;return <DashboardLayout>{page}</DashboardLayout>}
-export default SupplierDashboard;
+import {useState,useMemo} from 'react';
+import {useLocation} from 'react-router-dom';
+import DashboardLayout from '../components/DashboardLayout';
+import Icon from '../components/Icon';
+import TabGroup,{Modal,ConfirmDialog} from '../components/TabGroup';
+import SmartTable from '../components/SmartTable';
+import {products as seedProducts} from '../data';
+import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from '../services/analytics';
+import {useToast} from '../components/Toast';
+
+const KEY='mvec_supplier_products';
+const read=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}};
+const money=n=>new Intl.NumberFormat('en-RW').format(Number(n)||0)+' RWF';
+
+// ─── SEED DATA ────────────────────────────────────────────────────────────────
+const seeded=seedProducts.slice(0,6).map((p,i)=>({...p,id:`SUP-${p.id}`,wholesalePrice:Math.round(p.price*.82),moq:i%2?5:10,bulkDiscount:i%2?5:8}));
+const seedOrders=[
+  {id:'B2B-2001',vendor:'Kigali Tech Store',products:'Electronics bundle',total:2200000,payment:'SUCCESS',status:'Ready for delivery',settlement:'HELD'},
+  {id:'B2B-2002',vendor:'Smart Hub Rwanda',products:'Phone accessories',total:1480000,payment:'SUCCESS',status:'In Transit',settlement:'HELD'},
+  {id:'B2B-2003',vendor:'Urban Closet',products:'Fashion items',total:860000,payment:'PENDING',status:'Awaiting Payment',settlement:'PENDING'},
+];
+const seedVendors=[
+  {id:1,name:'Kigali Tech Store',category:'Electronics',orders:42,totalSpent:2200000,rating:4.9,status:'Active'},
+  {id:2,name:'Smart Hub Rwanda',category:'Phones',orders:31,totalSpent:1480000,rating:4.8,status:'Active'},
+  {id:3,name:'Urban Closet',category:'Fashion',orders:18,totalSpent:860000,rating:4.7,status:'Active'},
+  {id:4,name:'HomeStyle Kigali',category:'Home & Living',orders:12,totalSpent:540000,rating:4.6,status:'Inactive'},
+];
+const seedWallet={pending:3680000,available:1840000,history:[
+  {id:'TXN-S01',type:'Escrow Hold',reference:'B2B-2001',amount:2200000,status:'Held',date:'2026-08-26'},
+  {id:'TXN-S02',type:'Escrow Hold',reference:'B2B-2002',amount:1480000,status:'Held',date:'2026-08-27'},
+  {id:'TXN-S03',type:'Settlement Released',reference:'B2B-2000',amount:920000,status:'Released',date:'2026-08-25'},
+]};
+const seedReports=[
+  {metric:'Fulfillment Speed',value:'94%',status:'Good'},
+  {metric:'Stock Accuracy',value:'98.2%',status:'Excellent'},
+  {metric:'Dispute Rate',value:'1.2%',status:'Low'},
+  {metric:'Vendor Satisfaction',value:'4.7/5',status:'High'},
+];
+
+// ─── REUSABLE ─────────────────────────────────────────────────────────────────
+
+function Metric({label,value,icon,sub}){
+  return <div className="metric"><div className="metric-icon"><Icon name={icon}/></div><div><span>{label}</span><strong>{value}</strong>{sub&&<small>{sub}</small>}</div></div>;
+}
+
+function StatusBadge({status}){
+  const cls=['Active','Available','Completed','Released','Success','Good','Excellent','High','Low'].includes(status)?'active':
+             ['Suspended','Blocked','Cancelled','Failed','Out of stock','Inactive'].includes(status)?'danger':
+             ['Pending','Processing','Draft','Held','In Transit','Awaiting Payment','Ready for delivery'].includes(status)?'warning':'';
+  return <em className={'status '+cls}>{status}</em>;
+}
+
+function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
+  const [sortKey,setSortKey]=useState(null);
+  const [sortDir,setSortDir]=useState('asc');
+  const [q,setQ]=useState('');
+  const [page,setPage]=useState(1);
+  const per=8;
+  
+  const filtered=useMemo(()=>{
+    let result=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
+    if(sortKey){
+      result=[...result].sort((a,b)=>{
+        const va=a[sortKey],vb=b[sortKey];
+        const cmp=typeof va==='number'?va-vb:String(va||'').localeCompare(String(vb||''));
+        return sortDir==='asc'?cmp:-cmp;
+      });
+    }
+    return result;
+  },[rows,q,sortKey,sortDir]);
+  
+  const totalPages=Math.max(1,Math.ceil(filtered.length/per));
+  const current=Math.min(page,totalPages);
+  const shown=filtered.slice((current-1)*per,current*per);
+  
+  return (
+    <div className="data-card">
+      <div className="data-card-head">
+        <div className="dash-toolbar" style={{width:'100%'}}>
+          <div className="dash-filter"><Icon name="search"/><input value={q} onChange={e=>{setQ(e.target.value);setPage(1)}} placeholder="Search…"/></div>
+          <span className="table-count">{filtered.length} records</span>
+        </div>
+      </div>
+      <div className="data-table">
+        <div className="data-row table-header">
+          {columns.map(col=>(
+            <span key={col.key} className="table-label sortable" onClick={()=>{if(sortKey===col.key)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(col.key);setSortDir('asc');}}}>
+              {col.label}{sortKey===col.key&&(sortDir==='asc'?' ↑':' ↓')}
+            </span>
+          ))}
+          {actions&&<span className="table-label">Actions</span>}
+        </div>
+        {shown.length===0?(
+          <div className="data-row table-empty">{emptyText}</div>
+        ):shown.map((r,i)=>(
+          <div className="data-row" key={rowKey?rowKey(r,i):i}>
+            {columns.map(col=>(<span key={col.key}>{col.render?col.render(r):r[col.key]}</span>))}
+            {actions&&<span className="row-actions">{actions(r)}</span>}
+          </div>
+        ))}
+      </div>
+      {totalPages>1&&(
+        <div className="pagination">
+          <button disabled={current<=1} onClick={()=>setPage(p=>p-1)}>←</button>
+          <span>Page {current} of {totalPages}</span>
+          <button disabled={current>=totalPages} onClick={()=>setPage(p=>p+1)}>→</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SUPPLIER OVERVIEW ────────────────────────────────────────────────────────
+
+function SupplierOverview(){
+  const [tab,setTab]=useState('pending');
+  const [period,setPeriod]=useState('30 Days');
+  const chart=getPeriodChart(period);
+  const labels=getPeriodLabels(period);
+  const [orders,setOrders]=useState(seedOrders);
+
+  const markShipped=(order)=>{
+    setOrders(prev=>prev.map(x=>x.id===order.id?{...x,status:'Shipped',settlement:'HELD'}:x));
+  };
+
+  const pendingColumns=[
+    {key:'id',label:'Order'},{key:'vendor',label:'Vendor'},{key:'products',label:'Products'},
+    {key:'total',label:'Total',render:r=>money(r.total)},{key:'payment',label:'Payment',render:r=><StatusBadge status={r.payment}/>},
+    {key:'settlement',label:'Funds',render:r=><StatusBadge status={r.settlement}/>},
+  ];
+  const shippedColumns=[
+    {key:'id',label:'Order'},{key:'vendor',label:'Vendor'},{key:'products',label:'Products'},
+    {key:'total',label:'Total',render:r=>money(r.total)},{key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
+  ];
+  const inventoryColumns=[
+    {key:'name',label:'Product',render:r=>(<div className="admin-product-main"><img src={r.image} alt=""/><div><b>{r.name}</b><small>MOQ: {r.moq}</small></div></div>)},
+    {key:'wholesalePrice',label:'Price',render:r=>money(r.wholesalePrice)},
+    {key:'stock',label:'Stock',render:r=>r.stock},
+    {key:'bulkDiscount',label:'Discount',render:r=>`${r.bulkDiscount}%`},
+  ];
+
+  const getTabData=()=>{
+    switch(tab){
+      case 'shipped':return {columns:shippedColumns,rows:orders.filter(o=>o.status==='Shipped'||o.status==='In Transit')};
+      case 'inventory':return {columns:inventoryColumns,rows:read(KEY).length?read(KEY):seeded};
+      default:return {columns:pendingColumns,rows:orders.filter(o=>o.status!=='Shipped'&&o.status!=='In Transit')};
+    }
+  };
+  const {columns,rows}=getTabData();
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">SUPPLIER PLATFORM</span>
+          <h1>Supplier Overview</h1>
+          <p>Wholesale revenue, active B2B orders and pending shipments.</p>
+        </div>
+        <select className="period-select" value={period} onChange={e=>setPeriod(e.target.value)}>
+          <option>Today</option><option>7 Days</option><option>30 Days</option><option>3 Months</option><option>1 Year</option>
+        </select>
+      </div>
+
+      <div className="metric-grid">
+        <Metric label="Wholesale Revenue" value={money(Math.round(getPeriodMetrics(period).sales*.455))} icon="chart" sub={`${period} performance`}/>
+        <Metric label="Active B2B Orders" value={orders.filter(o=>o.status!=='Completed').length} icon="cart" sub="In progress"/>
+        <Metric label="Pending Shipments" value={orders.filter(o=>o.status==='Ready for delivery').length} icon="box" sub="Needs action"/>
+      </div>
+
+      <div className="dash-grid">
+        <div className="data-card chart-card">
+          <div className="data-card-head"><div><h3>Wholesale Performance</h3><span>{period}</span></div></div>
+          <div className="fake-chart">{chart.map((h,i)=><div key={i} style={{height:h+'%'}}><span>{labels[i]}</span></div>)}</div>
+        </div>
+        <div className="data-card">
+          <div className="data-card-head"><div><h3>Protected Settlements</h3><span>Escrow status</span></div></div>
+          {seedWallet.history.slice(0,3).map(txn=>(
+            <div className="activity-row" key={txn.id}><div><b>{txn.id}</b><small>{txn.reference} · {txn.type}</small></div><StatusBadge status={txn.status}/></div>
+          ))}
+        </div>
+      </div>
+
+      <div className="verified-box"><b>🔒 MVEC protected settlement</b><p>When a vendor pays a supplier through MVEC, funds are held. After fulfillment confirmation, the full supplier amount is released.</p></div>
+
+      <TabGroup tabs={[{key:'pending',label:'Pending Supply Orders',count:orders.filter(o=>o.status!=='Shipped'&&o.status!=='In Transit').length},{key:'shipped',label:'Shipped Orders',count:orders.filter(o=>o.status==='Shipped'||o.status==='In Transit').length},{key:'inventory',label:'Inventory Levels'}]} activeTab={tab} onTabChange={setTab}/>
+      
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={r=>r.id||r.name}
+        actions={tab==='pending'?(r)=><button className="gradient-btn" onClick={()=>markShipped(r)}>Mark Shipped</button>:null}
+      />
+    </>
+  );
+}
+
+// ─── SUPPLIER WALLET ──────────────────────────────────────────────────────────
+
+function SupplierWallet(){
+  const toast=useToast();
+  const [wallet]=useState(seedWallet);
+  const [withdrawModal,setWithdrawModal]=useState(false);
+  const [amount,setAmount]=useState(wallet.available);
+  const [method,setMethod]=useState('Bank Transfer');
+  const [account,setAccount]=useState('BNK-00123456');
+
+  const submitWithdrawal=()=>{
+    if(amount<50000){toast.error('Minimum withdrawal is RWF 50,000.');return;}
+    toast.success(`Withdrawal of ${money(amount)} requested.`);
+    setWithdrawModal(false);
+  };
+
+  const txnColumns=[
+    {key:'id',label:'Reference'},{key:'type',label:'Type'},{key:'amount',label:'Amount',render:r=>money(r.amount)},
+    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},{key:'date',label:'Date'},
+  ];
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">SUPPLIER PLATFORM</span>
+          <h1>Wallet</h1>
+          <p>Pending balance held until vendor confirms stock receipt vs. available balance.</p>
+        </div>
+        <button className="gradient-btn" onClick={()=>setWithdrawModal(true)}>Request Payout</button>
+      </div>
+
+      <div className="metric-grid">
+        <Metric label="Pending Balance" value={money(wallet.pending)} icon="wallet" sub="Held until delivery confirmed"/>
+        <Metric label="Available Balance" value={money(wallet.available)} icon="wallet" sub="Cleared for withdrawal"/>
+      </div>
+
+      <DataTable columns={txnColumns} rows={wallet.history} rowKey={r=>r.id} emptyText="No transactions yet."/>
+
+      <Modal open={withdrawModal} onClose={()=>setWithdrawModal(false)} title="WITHDRAWAL" subtitle="Request a payout">
+        <p>Available balance: <b>{money(wallet.available)}</b>. Minimum withdrawal is RWF 50,000.</p>
+        <label className="field"><span>Amount (RWF)</span><input type="number" min="50000" step="1000" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></label>
+        <label className="field"><span>Payment method</span><select value={method} onChange={e=>setMethod(e.target.value)}><option>Bank Transfer</option><option>MTN MoMo</option></select></label>
+        <label className="field"><span>Account number</span><input value={account} onChange={e=>setAccount(e.target.value)}/></label>
+        <div className="modal-actions">
+          <button className="outline-btn" onClick={()=>setWithdrawModal(false)}>Cancel</button>
+          <button className="gradient-btn" onClick={submitWithdrawal} disabled={wallet.available<50000}>Submit Request</button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+// ─── SUPPLIER VENDORS ─────────────────────────────────────────────────────────
+
+function SupplierVendors(){
+  const toast=useToast();
+  const [vendors]=useState(seedVendors);
+  const [inviteModal,setInviteModal]=useState(null);
+  const [inviteMessage,setInviteMessage]=useState('');
+
+  const sendInvite=(vendor)=>{
+    toast.success(`Invitation sent to ${vendor.name}.`);
+    setInviteModal(null);
+    setInviteMessage('');
+  };
+
+  const columns=[
+    {key:'name',label:'Vendor',render:r=>(<div><b>{r.name}</b><small>{r.category}</small></div>)},
+    {key:'orders',label:'Orders'},
+    {key:'totalSpent',label:'Total Spent',render:r=>money(r.totalSpent)},
+    {key:'rating',label:'Rating',render:r=>`★ ${r.rating}`},
+    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
+  ];
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">SUPPLIER PLATFORM</span>
+          <h1>Vendors</h1>
+          <p>Directory of active marketplace vendors for wholesale partnerships.</p>
+        </div>
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={vendors}
+        rowKey={r=>r.id}
+        actions={r=>r.status==='Active'?<button className="gradient-btn" onClick={()=>setInviteModal(r)}>Invite to Catalog</button>:null}
+      />
+
+      <Modal open={!!inviteModal} onClose={()=>setInviteModal(null)} title="INVITE VENDOR" subtitle={`Invite ${inviteModal?.name} to your wholesale catalog`}>
+        <div className="vendor-detail-grid">
+          <div><span>Vendor</span><b>{inviteModal?.name}</b></div>
+          <div><span>Category</span><b>{inviteModal?.category}</b></div>
+        </div>
+        <label className="field"><span>Message (optional)</span><textarea value={inviteMessage} onChange={e=>setInviteMessage(e.target.value)} rows="3" placeholder="Add a personalized message…"/></label>
+        <div className="modal-actions">
+          <button className="outline-btn" onClick={()=>setInviteModal(null)}>Cancel</button>
+          <button className="gradient-btn" onClick={()=>sendInvite(inviteModal)}>Send Invitation</button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+// ─── SUPPLIER PRODUCTS ────────────────────────────────────────────────────────
+
+function SupplierProducts(){
+  const toast=useToast();
+  const [rows,setRows]=useState(()=>read(KEY).length?read(KEY):seeded);
+  const [editModal,setEditModal]=useState(null);
+  const [deleteConfirm,setDeleteConfirm]=useState(null);
+  const [form,setForm]=useState({name:'',category:'Electronics',wholesalePrice:0,moq:1,stock:0,bulkDiscount:0,description:''});
+
+  const persist=next=>{setRows(next);localStorage.setItem(KEY,JSON.stringify(next))};
+
+  const saveProduct=()=>{
+    if(!form.name){toast.error('Product name is required.');return;}
+    const product={...form,id:form.id||`SUP-${Date.now()}`};
+    const isNew=!form.id;
+    persist(isNew?[product,...rows]:rows.map(x=>x.id===form.id?{...x,...product}:x));
+    toast.success(isNew?'Wholesale product added.':'Wholesale product saved.');
+    setEditModal(null);
+  };
+
+  const deleteProduct=(p)=>{
+    persist(rows.filter(x=>x.id!==p.id));
+    toast.success('Product deleted.');
+    setDeleteConfirm(null);
+  };
+
+  const openCreate=()=>{setForm({name:'',category:'Electronics',wholesalePrice:0,moq:1,stock:0,bulkDiscount:0,description:''});setEditModal({isNew:true});};
+  const openEdit=(p)=>{setForm({...p});setEditModal({isNew:false});};
+
+  const columns=[
+    {key:'name',label:'Product',render:r=>(<div className="admin-product-main"><img src={r.image||seedProducts[0].image} alt=""/><div><b>{r.name}</b><small>{r.category} · MOQ {r.moq}</small></div></div>)},
+    {key:'wholesalePrice',label:'Price',render:r=>money(r.wholesalePrice)},
+    {key:'stock',label:'Stock'},
+    {key:'bulkDiscount',label:'Discount',render:r=>`${r.bulkDiscount}%`},
+    {key:'status',label:'Status',render:r=><StatusBadge status={Number(r.stock)>0?'Available':'Out of stock'}/>},
+  ];
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">SUPPLIER PLATFORM</span>
+          <h1>Wholesale Products</h1>
+          <p>Manage products that vendors can buy in bulk.</p>
+        </div>
+        <button className="gradient-btn" onClick={openCreate}><Icon name="plus"/> Add Product</button>
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={r=>r.id}
+        actions={r=>(<>
+          <button title="Edit" onClick={()=>openEdit(r)}><Icon name="edit"/></button>
+          <button title="Delete" onClick={()=>setDeleteConfirm(r)}><Icon name="trash"/></button>
+        </>)}
+      />
+
+      <Modal open={!!editModal} onClose={()=>setEditModal(null)} title={editModal?.isNew?'ADD PRODUCT':'EDIT PRODUCT'} subtitle="Wholesale catalog management" wide>
+        <div className="product-form">
+          <div className="two-col">
+            <label className="field"><span>Product name *</span><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required placeholder="Product name"/></label>
+            <label className="field"><span>Category</span><select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{['Electronics','Phones','Computers','Fashion','Home & Living','Beauty','Sports','Automotive'].map(c=><option key={c}>{c}</option>)}</select></label>
+          </div>
+          <div className="three-col">
+            <label className="field"><span>Wholesale price (RWF) *</span><input type="number" min="0" value={form.wholesalePrice} onChange={e=>setForm({...form,wholesalePrice:Number(e.target.value)})} required/></label>
+            <label className="field"><span>MOQ *</span><input type="number" min="1" value={form.moq} onChange={e=>setForm({...form,moq:Number(e.target.value)})} required/></label>
+            <label className="field"><span>Stock *</span><input type="number" min="0" value={form.stock} onChange={e=>setForm({...form,stock:Number(e.target.value)})} required/></label>
+          </div>
+          <div className="two-col">
+            <label className="field"><span>Bulk discount (%)</span><input type="number" min="0" max="100" value={form.bulkDiscount} onChange={e=>setForm({...form,bulkDiscount:Number(e.target.value)})}/></label>
+          </div>
+          <label className="field"><span>Description</span><textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} rows="3" placeholder="Product details for vendors…"/></label>
+        </div>
+        <div className="modal-actions">
+          <button className="outline-btn" onClick={()=>setEditModal(null)}>Cancel</button>
+          <button className="gradient-btn" onClick={saveProduct}>{editModal?.isNew?'Add Product':'Save Changes'}</button>
+        </div>
+      </Modal>
+
+      <ConfirmDialog open={!!deleteConfirm} title="Delete Product" message={`Delete ${deleteConfirm?.name}?`} danger onConfirm={()=>deleteProduct(deleteConfirm)} onCancel={()=>setDeleteConfirm(null)}/>
+    </>
+  );
+}
+
+// ─── SUPPLIER REPORTS ─────────────────────────────────────────────────────────
+
+function SupplierReports(){
+  const [dateRange,setDateRange]=useState('30');
+
+  return (
+    <>
+      <div className="dash-page-head">
+        <div>
+          <span className="eyebrow">SUPPLIER PLATFORM</span>
+          <h1>Reports</h1>
+          <p>Fulfillment metrics, stock accuracy and vendor feedback.</p>
+        </div>
+        <select className="period-select" value={dateRange} onChange={e=>setDateRange(e.target.value)}>
+          <option value="7">Last 7 Days</option><option value="30">Last 30 Days</option><option value="90">Last 3 Months</option>
+        </select>
+      </div>
+
+      <div className="metric-grid">
+        {seedReports.map(r=>(
+          <Metric key={r.metric} label={r.metric} value={r.value} icon="chart" sub={r.status}/>
+        ))}
+      </div>
+
+      <div className="data-card">
+        <div className="data-card-head"><div><h3>Performance Summary</h3><span>{dateRange} period</span></div></div>
+        {seedReports.map(r=>(
+          <div className="activity-row" key={r.metric}>
+            <div><b>{r.metric}</b><small>{r.status}</small></div>
+            <strong>{r.value}</strong>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ─── MAIN SUPPLIER DASHBOARD ──────────────────────────────────────────────────
+
+export default function SupplierDashboard(){
+  const path=useLocation().pathname;
+  
+  if(path.includes('/wallet'))return <DashboardLayout><SupplierWallet/></DashboardLayout>;
+  if(path.includes('/vendors'))return <DashboardLayout><SupplierVendors/></DashboardLayout>;
+  if(path.includes('/products'))return <DashboardLayout><SupplierProducts/></DashboardLayout>;
+  if(path.includes('/reports'))return <DashboardLayout><SupplierReports/></DashboardLayout>;
+  return <DashboardLayout><SupplierOverview/></DashboardLayout>;
+}
