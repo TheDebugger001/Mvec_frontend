@@ -270,7 +270,7 @@ function AdminOverview(){
         <Metric label="Gross Revenue" value={money(periodMetrics.sales)} change={`${chartKey} revenue`} icon="chart"/>
         <Metric label="Active Orders" value={periodMetrics.orders} change={`${chartKey} orders`} icon="cart"/>
         <Metric label="SLA Breaches" value="3" change="Needs attention" icon="bell"/>
-        <Metric label="Net Commission" value={money(Math.round(periodMetrics.sales*0.15))} change={`${chartKey} commission`} icon="wallet"/>
+        <Metric label="Net Commission" value={money(Math.round(periodMetrics.sales*0.05))} change={`${chartKey} commission`} icon="wallet"/>
       </div>
 
       <div className="dash-grid">
@@ -460,7 +460,7 @@ function AdminUsers(){
   const [editModal,setEditModal]=useState(null);
   const [confirmAction,setConfirmAction]=useState(null);
   const [commissionModal,setCommissionModal]=useState(null);
-  const [commissionRate,setCommissionRate]=useState(10);
+  const [commissionRate,setCommissionRate]=useState(5);
 
   // Backend sync
   useEffect(()=>{
@@ -521,7 +521,7 @@ function AdminUsers(){
           <button className="table-action-btn" title="View" onClick={()=>setEditModal({type:'view',data:r})}><Icon name="eye"/></button>
           {r.status==='Pending'&&<button className="table-action-btn" title="Approve" onClick={()=>approveVendor(r)}><Icon name="check"/></button>}
           {r.status!=='Suspended'&&<button className="table-action-btn warning" title="Suspend" onClick={()=>setConfirmAction({action:()=>suspendVendor(r),message:`Suspend ${r.name}?`})}><Icon name="lock"/></button>}
-          <button className="table-action-btn" title="Commission" onClick={()=>{setCommissionModal(r);setCommissionRate(10)}}><Icon name="wallet"/></button>
+          <button className="table-action-btn" title="Commission" onClick={()=>{setCommissionModal(r);setCommissionRate(5)}}><Icon name="wallet"/></button>
         </>
       )};
       case 'suppliers':return {columns:supplierColumns,rows:suppliersList,actions:r=>(

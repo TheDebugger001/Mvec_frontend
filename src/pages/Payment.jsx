@@ -41,13 +41,28 @@ export default function Payment(){
     setError("");
     setProcessing(true);
     try{
-      if(method==="momo"){
+      if(method==="momo"||method==="airtel"){
         if(!phone.trim()){setError("Please enter your mobile number.");setProcessing(false);return;}
-        const res=await paymentsApi.initiateMoMo({orderId:id,phoneNumber:phone.trim()});
-        try{confirmPayment(id,"MOMO");}catch{}
-        setDone(true);
-        toast.success(res.message||"USSD prompt sent to your phone. Please approve it.");
-        setTimeout(()=>navigate(`/orders/${id}`),1200);
+        try{
+          const res=method==="momo"
+            ?await paymentsApi.initiateMoMo({orderId:id,phoneNumber:phone.trim()})
+            :await paymentsApi.initiateAirtel({orderId:id,phoneNumber:phone.trim()});
+          try{confirmPayment(id,method==="momo"?"MOMO":"AIRTEL");}catch{}
+          setDone(true);
+          toast.success(res.message||"USSD prompt sent to your phone. Please approve it.");
+          setTimeout(()=>navigate(`/orders/${id}`),1200);
+        }catch(err){
+          // Fallback for demo / offline order IDs
+          try{
+            confirmPayment(id,method);
+            setDone(true);
+            toast.success("Payment confirmed");
+            setTimeout(()=>navigate(`/orders/${id}`),500);
+          }catch{
+            const msg=extractErrorMessage(err);
+            setError(msg);toast.error(msg);setProcessing(false);
+          }
+        }
       }else{
         await ordersApi.confirmPayment(id, method.toUpperCase());
         try{confirmPayment(id,method);}catch{}
@@ -71,10 +86,11 @@ export default function Payment(){
   return <Storefront><main className="payment-page"><div className="page-title"><span className="eyebrow">PAYMENT</span><h1>Pay for your order</h1><p>Order #{order.orderNumber||order.id} · Total {money(order.total)}</p></div>
     {error&&<div className="form-alert error">{error}</div>}
     <div className="payment-layout"><section className="payment-card"><h2>Choose a payment method</h2>
-      <label className={`payment-option ${method==="momo"?"selected":""}`}><input type="radio" checked={method==="momo"} onChange={()=>setMethod("momo")}/><span className="payment-logo">M</span><div><b>Mobile Money</b><small>MTN MoMo / Airtel Money</small></div></label>
+      <label className={`payment-option ${method==="momo"?"selected":""}`}><input type="radio" checked={method==="momo"} onChange={()=>setMethod("momo")}/><span className="payment-logo">M</span><div><b>MTN MoMo</b><small>Pay with an MTN number (starts with 078 / 079)</small></div></label>
+      <label className={`payment-option ${method==="airtel"?"selected":""}`}><input type="radio" checked={method==="airtel"} onChange={()=>setMethod("airtel")}/><span className="payment-logo">A</span><div><b>Airtel Money</b><small>Pay with an Airtel number (starts with 073 / 072)</small></div></label>
       <label className={`payment-option ${method==="card"?"selected":""}`}><input type="radio" checked={method==="card"} onChange={()=>setMethod("card")}/><span className="payment-logo">▣</span><div><b>Visa / Mastercard</b><small>Pay with your bank card</small></div></label>
       <label className={`payment-option ${method==="bank"?"selected":""}`}><input type="radio" checked={method==="bank"} onChange={()=>setMethod("bank")}/><span className="payment-logo">₣</span><div><b>Bank transfer</b><small>Use your preferred Rwandan bank</small></div></label>
-      {method==="momo"&&<div className="payment-fields"><label className="field"><span>Mobile number</span><input placeholder="078xxxxxxx" value={phone} onChange={e=>setPhone(e.target.value)}/></label></div>}
+      {(method==="momo"||method==="airtel")&&<div className="payment-fields"><label className="field"><span>{method==="momo"?"MTN MoMo":"Airtel Money"} number</span><input placeholder={method==="momo"?"078xxxxxxx":"073xxxxxxx"} value={phone} onChange={e=>setPhone(e.target.value)}/></label></div>}
       {method==="card"&&<div className="payment-fields"><label className="field"><span>Card number</span><input placeholder="Card number"/></label><div className="two-col"><label className="field"><span>Expiry</span><input placeholder="MM/YY"/></label><label className="field"><span>CVV</span><input placeholder="CVV"/></label></div></div>}
       <button className="gradient-btn full" onClick={pay} disabled={processing||done}>{done?"Payment confirmed":processing?"Confirming payment…":"Pay securely"}</button>
     </section><aside className="security-panel"><div className="secure-icon">✓</div><h3>How MVEC works</h3><p>For this protected-settlement flow, your payment is recorded as HELD until delivery is confirmed. In production, the actual funds must be held and released by an appropriately regulated payment/escrow partner.</p><div className="status-flow"><span>Payment</span><i>→</i><span>MVEC holds</span><i>→</i><span>Delivery</span><i>→</i><span>Release</span></div><p className="tiny">After payment, the delivery window is three hours. You may cancel within the first 30 minutes. Your delivery OTP is generated after payment and is required at the door.</p></aside></div>

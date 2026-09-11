@@ -265,7 +265,7 @@ export function getCommissionRate() {
   return raw!==null && Number.isFinite(n) && n>=0 ? n : 5;
 }
 export function calculateCommission(amount, rate = getCommissionRate()) { return Math.round(Number(amount || 0) * Number(rate || 0) / 100); }
-export function getAffiliateCommissionRate(){ const raw=localStorage.getItem('mvec_affiliate_commission_rate'); const n=Number(raw); return raw!==null&&Number.isFinite(n)&&n>=0?n:2; }
+export function getAffiliateCommissionRate(){ const raw=localStorage.getItem('mvec_affiliate_commission_rate'); const n=Number(raw); return raw!==null&&Number.isFinite(n)&&n>=0?n:0.5; }
 export function calculateAffiliateCommission(amount,rate=getAffiliateCommissionRate()){ return Math.round(Number(amount||0)*Number(rate||0)/100); }
 export function getCatalogProducts(baseProducts = []) {
   const extra = read("mvec_vendor_products", []);
