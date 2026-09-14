@@ -19,7 +19,14 @@ const money=n=>new Intl.NumberFormat('en-RW').format(Number(n)||0)+' RWF';
 const PRODUCT_KEY='mvec_vendor_products';
 
 const readJSON=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
-const toBackendPayload=p=>({name:p.name,sku:p.sku,brand:p.brand||'',description:p.description||'',price:Number(p.price)||0,stockQuantity:Math.max(0,Number(p.stock)||0),status:(Number(p.stock)||0)<=0?'OUT_OF_STOCK':'ACTIVE',media:{mainImage:p.images?.[0]||p.image||'',gallery:p.images||[]}});
+const toBackendPayload=p=>({name:p.name,sku:p.sku,brand:p.brand||'',description:p.description||'',price:Number(p.price)||0,stockQuantity:Math.max(0,Number(p.stock)||0),status:(Number(p.stock)||0)<=0?'OUT_OF_STOCK':'ACTIVE',color:p.color||'',size:p.size||'',attributes:{Color:p.color||'',Size:p.size||'',Material:p.material||'',Brand:p.brand||''},media:{mainImage:p.images?.[0]||p.image||'',gallery:Array.isArray(p.images)?p.images:[],videos:Array.isArray(p.videos)?p.videos:[]}});
+
+const fileToDataURLs=(files,onDone)=>{
+  const arr=Array.from(files||[]);
+  if(!arr.length){onDone([]);return;}
+  const out=[];let done=0;
+  arr.forEach(f=>{const r=new FileReader();r.onload=()=>{out.push(r.result);if(++done===arr.length)onDone(out);};r.readAsDataURL(f);});
+};
 
 // ─── SEED DATA ────────────────────────────────────────────────────────────────
 const initialProducts=seedProducts.map(p=>({...p,shortDescription:p.description?.slice(0,90)||'',status:p.stock?'Active':'Out of stock',images:[p.image],vendor:'Kigali Tech Store'}));
@@ -317,18 +324,18 @@ function VendorProducts(){
   const {user}=useAuth();
   const toast=useToast();
   const owner=user?.companyName||user?.fullName||'Kigali Tech Store';
-  const normalize=p=>({...p,images:Array.isArray(p.images)?p.images:(p.image?[p.image]:[]),status:p.status||'Active'});
+  const normalize=p=>({...p,images:Array.isArray(p.images)?p.images:(p.image?[p.image]:[]),videos:Array.isArray(p.videos)?p.videos:(Array.isArray(p.media?.videos)?p.media.videos:[]),color:p.color||'',size:p.size||'',brand:p.brand||'',status:p.status||'Active'});
   const [rows,setRows]=useState(()=>readJSON(PRODUCT_KEY,initialProducts).map(normalize).filter(p=>!p.vendor||p.vendor===owner));
   const [editModal,setEditModal]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
-  const [form,setForm]=useState({name:'',sku:'',category:'',price:'',stock:'',description:'',status:'Draft'});
+  const [form,setForm]=useState({name:'',sku:'',category:'',price:'',stock:'',description:'',status:'Draft',color:'',size:'',brand:'',images:[],videos:[]});
   const [categories]=useState(['Electronics','Phones','Computers','Fashion','Home & Living','Beauty','Sports','Automotive']);
 
   const persist=next=>{setRows(next);localStorage.setItem(PRODUCT_KEY,JSON.stringify(next))};
 
   const saveProduct=async()=>{
     if(!form.name||!form.sku||!form.category||form.price===''){toast.error('Please complete required fields.');return;}
-    const product={...form,id:form.id||Date.now(),price:Number(form.price),stock:Number(form.stock),image:form.images?.[0]||'',vendor:owner};
+    const product={...form,id:form.id||Date.now(),price:Number(form.price),stock:Number(form.stock),image:form.images?.[0]||'',gallery:Array.isArray(form.images)?form.images:[],vendor:owner};
     
     if(hasToken()){
       try{
@@ -356,8 +363,8 @@ function VendorProducts(){
     toast.info(p.status==='Archived'?'Product restored.':'Product archived.');
   };
 
-  const openCreate=()=>{setForm({name:'',sku:'',category:'',price:'',stock:'',description:'',status:'Draft'});setEditModal({isNew:true});};
-  const openEdit=(p)=>{setForm({...p,price:String(p.price),stock:String(p.stock)});setEditModal({isNew:false});};
+  const openCreate=()=>{setForm({name:'',sku:'',category:'',price:'',stock:'',description:'',status:'Draft',color:'',size:'',brand:'',images:[],videos:[]});setEditModal({isNew:true});};
+  const openEdit=(p)=>{setForm({...normalize(p),price:String(p.price),stock:String(p.stock)});setEditModal({isNew:false});};
 
   const columns=[
     {key:'name',label:'Product',render:r=>(
@@ -406,10 +413,31 @@ function VendorProducts(){
             <label className="field"><span>Brand</span><input value={form.brand||''} onChange={e=>setForm({...form,brand:e.target.value})} placeholder="Brand name"/></label>
           </div>
           <label className="field"><span>Description *</span><textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} rows="4" required placeholder="Describe the product…"/></label>
+          <div className="two-col">
+            <label className="field"><span>Color (optional)</span><input value={form.color||''} onChange={e=>setForm({...form,color:e.target.value})} placeholder="e.g. Midnight Black"/></label>
+            <label className="field"><span>Size (optional)</span><input value={form.size||''} onChange={e=>setForm({...form,size:e.target.value})} placeholder="e.g. 256GB / L / 42"/></label>
+          </div>
           <div className="three-col">
             <label className="field"><span>Price (RWF) *</span><input type="number" min="0" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} required/></label>
             <label className="field"><span>Stock *</span><input type="number" min="0" value={form.stock} onChange={e=>setForm({...form,stock:e.target.value})} required/></label>
             <label className="field"><span>Status</span><select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}><option>Draft</option><option>Active</option><option>Archived</option></select></label>
+          </div>
+          <div className="editor-section">
+            <h3>Media <small style={{fontWeight:400,fontSize:11}}>(optional — add as many as you want)</small></h3>
+            <div className="upload-grid">
+              <label className="upload-zone">
+                <b>+ Add product photos</b>
+                <small>Click to upload, one or many images</small>
+                <input type="file" accept="image/*" multiple onChange={e=>fileToDataURLs(e.target.files,added=>{if(!added.length)return;setForm(f=>({...f,images:[...(f.images||[]),...added]}))})}/>
+              </label>
+              <label className="upload-zone">
+                <b>+ Add product video</b>
+                <small>One or more videos</small>
+                <input type="file" accept="video/*" multiple onChange={e=>fileToDataURLs(e.target.files,added=>{if(!added.length)return;setForm(f=>({...f,videos:[...(f.videos||[]),...added]}))})}/>
+              </label>
+            </div>
+            {Array.isArray(form.images)&&form.images.length>0&&<div className="media-grid">{form.images.map((img,i)=><div className="media-thumb" key={i}><img src={img} alt=""/>{i===0?<span>MAIN</span>:null}<button type="button" title="Remove" onClick={()=>setForm(f=>({...f,images:f.images.filter((x,j)=>j!==i)}))}>×</button></div>)}</div>}
+            {Array.isArray(form.videos)&&form.videos.length>0&&<div className="video-row">{form.videos.map((v,i)=><div className="video-chip" key={i}><video src={v} controls/><button type="button" title="Remove" onClick={()=>setForm(f=>({...f,videos:f.videos.filter((x,j)=>j!==i)}))}>×</button></div>)}</div>}
           </div>
         </div>
         <div className="modal-actions">

@@ -32,6 +32,7 @@ export default function GoogleButton() {
       google.accounts.id.initialize({
         client_id: CLIENT_ID,
         ux_mode: 'popup',
+        locale: 'en',
         callback: async (response) => {
           if (!response?.credential) return;
           setLoading(true);
@@ -53,7 +54,6 @@ export default function GoogleButton() {
         text: 'continue_with',
         shape: 'rectangular',
         width: Math.max(el.clientWidth || 340, 300),
-        locale: 'en',
       });
       renderedRef.current = true;
     };

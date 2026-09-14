@@ -5,18 +5,14 @@ import {useTheme} from '../context/ThemeContext';
 import Icon from './Icon';
 import {products,vendors} from '../data';
 
-const _navState={};
-
 export default function DashboardLayout({admin=false,children}){
   const {user,logout,effectiveRole,switchRole}=useAuth();
   const loc=useLocation();
   const navigate=useNavigate();
   const {theme,toggleTheme}=useTheme();
   const displayRole=admin?'super_admin':effectiveRole||user?.role||'default';
-  const roleKey=displayRole;
   const [open,setOpen]=useState(false);
   const [search,setSearch]=useState('');
-  const [openGroups,setOpenGroups]=useState(()=>_navState[roleKey]||{});
   const [roleDropdown,setRoleDropdown]=useState(false);
   const avatar=localStorage.getItem('mvec_profile_image')||'';
   const roleRef=useRef(null);
@@ -72,37 +68,23 @@ export default function DashboardLayout({admin=false,children}){
         </div>
 
         <nav>
-          {items.groups?items.groups.map((g,gi)=>{
-            const inGroup=g.items.some(([href])=>loc.pathname===href);
-            const expanded=openGroups[gi]||inGroup;
-            return (
-              <div className={'sidebar-group'+(expanded?' open':'')} key={g.name}>
-                <button
-                  className={'sidebar-group-header'+(inGroup?' active':'')}
-                  onClick={()=>setOpenGroups(o=>{const n={...o,[gi]:!o[gi]};_navState[roleKey]=n;return n})}
-                >
-                  <Icon name={g.icon}/>
-                  <span>{g.name}</span>
-                  <Icon name="chevron"/>
-                </button>
-                {expanded&&(
-                  <div className="sidebar-group-items">
-                    {g.items.map(([href,label,icon])=>(
-                      <Link
-                        onClick={()=>setOpen(false)}
-                        className={loc.pathname===href?'active':''}
-                        key={href}
-                        to={href}
-                      >
-                        <Icon name={icon}/>
-                        <span>{label}</span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
+          {items.groups?items.groups.map(g=>(
+            <div className="sidebar-group" key={g.name}>
+              <div className="sidebar-group-items">
+                {g.items.map(([href,label,icon])=>(
+                  <Link
+                    onClick={()=>setOpen(false)}
+                    className={loc.pathname===href?'active':''}
+                    key={href}
+                    to={href}
+                  >
+                    <Icon name={icon}/>
+                    <span>{label}</span>
+                  </Link>
+                ))}
               </div>
-            );
-          }):items.map(([href,label,icon])=>(
+            </div>
+          )):items.map(([href,label,icon])=>(
             <Link
               onClick={()=>setOpen(false)}
               className={loc.pathname===href?'act':''}

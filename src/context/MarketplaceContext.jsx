@@ -30,6 +30,16 @@ const normalizeCartItem = (item) => {
 
 const normalizeCart = (items) => (Array.isArray(items) ? items.map(normalizeCartItem).filter(Boolean) : []);
 
+// Anonymous carts are persisted to localStorage as raw product objects with a
+// `quantity` key. Normalize so both `qty` and `quantity` are always present
+// (Cart.jsx / Checkout.jsx read `qty`, cartCount reads `quantity`).
+const normalizeLocalCartItem = (item) => {
+  if (!item) return item;
+  const qty = Math.max(1, Number(item.quantity) || Number(item.qty) || 1);
+  return { ...item, quantity: qty, qty };
+};
+const normalizeLocalCart = (items) => (Array.isArray(items) ? items.map(normalizeLocalCartItem).filter(Boolean) : []);
+
 export function MarketplaceProvider({ children }) {
   const { user } = useAuth();
   const toast = useToast();
@@ -39,7 +49,7 @@ export function MarketplaceProvider({ children }) {
 
   const loadCart = useCallback(async () => {
     if (!user) {
-      setCart([]);
+      setCart(normalizeLocalCart(read("mvec_cart")));
       return;
     }
     setCartLoading(true);
@@ -62,8 +72,8 @@ export function MarketplaceProvider({ children }) {
       setCart((prev) => {
         const existing = prev.findIndex(x => String(x._id || x.id) === String(product._id || product.id));
         const next = existing >= 0
-          ? prev.map((x, i) => i === existing ? { ...x, quantity: (x.quantity || 1) + qty } : x)
-          : [...prev, { ...product, quantity: qty }];
+          ? prev.map((x, i) => i === existing ? { ...x, quantity: (x.quantity || 1) + qty, qty: (x.quantity || 1) + qty } : x)
+          : [...prev, { ...product, quantity: qty, qty }];
         localStorage.setItem('mvec_cart', JSON.stringify(next));
         return next;
       });
@@ -103,7 +113,7 @@ export function MarketplaceProvider({ children }) {
     const newQty = Math.max(1, qty);
     if (!user) {
       setCart((prev) => {
-        const next = prev.map(x => String(x._id || x.id) === String(id) ? { ...x, quantity: newQty } : x);
+        const next = prev.map(x => String(x._id || x.id) === String(id) ? { ...x, quantity: newQty, qty: newQty } : x);
         localStorage.setItem('mvec_cart', JSON.stringify(next));
         return next;
       });
