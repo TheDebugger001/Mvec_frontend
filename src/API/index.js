@@ -25,4 +25,5 @@ export { promotionsApi } from "./promotions";
 export { shippingApi } from "./shipping";
 export { notificationsApi } from "./notifications";
 export { reportsApi } from "./reports";
+export { abuseReportsApi } from "./abuseReports";
 export { client, extractErrorMessage, mapUser, mapAuthResponse } from "./client";

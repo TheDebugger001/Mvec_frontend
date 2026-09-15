@@ -1,4 +1,4 @@
-import {useState,useMemo} from 'react';
+import {useState,useMemo,useEffect} from 'react';
 import {useLocation} from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import Icon from '../components/Icon';
@@ -7,6 +7,8 @@ import SmartTable from '../components/SmartTable';
 import {products as seedProducts} from '../data';
 import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from '../services/analytics';
 import {useToast} from '../components/Toast';
+import {getOrders,updateOrder} from '../services/mvecStore';
+import {useLocalQuery} from '../hooks/useLocalQuery';
 
 const KEY='mvec_supplier_products';
 const read=k=>{try{return JSON.parse(localStorage.getItem(k)||"[]")}catch{return[]}};
@@ -51,6 +53,8 @@ function StatusBadge({status}){
 }
 
 function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
+  const safeColumns=Array.isArray(columns)?columns:[];
+  const safeRows=Array.isArray(rows)?rows:[];
   const [sortKey,setSortKey]=useState(null);
   const [sortDir,setSortDir]=useState('asc');
   const [q,setQ]=useState('');
@@ -58,7 +62,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
   const per=8;
   
   const filtered=useMemo(()=>{
-    let result=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
+    let result=safeRows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
     if(sortKey){
       result=[...result].sort((a,b)=>{
         const va=a[sortKey],vb=b[sortKey];
@@ -83,7 +87,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
       </div>
       <div className="data-table">
         <div className="data-row table-header">
-          {columns.map(col=>(
+          {safeColumns.map(col=>(
             <span key={col.key} className="table-label sortable" onClick={()=>{if(sortKey===col.key)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(col.key);setSortDir('asc');}}}>
               {col.label}{sortKey===col.key&&(sortDir==='asc'?' ↑':' ↓')}
             </span>
@@ -94,7 +98,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
           <div className="data-row table-empty">{emptyText}</div>
         ):shown.map((r,i)=>(
           <div className="data-row" key={rowKey?rowKey(r,i):i}>
-            {columns.map(col=>(<span key={col.key}>{col.render?col.render(r):r[col.key]}</span>))}
+            {safeColumns.map(col=>(<span key={col.key}>{col.render?col.render(r):r[col.key]}</span>))}
             {actions&&<span className="row-actions">{actions(r)}</span>}
           </div>
         ))}
@@ -117,10 +121,24 @@ function SupplierOverview(){
   const [period,setPeriod]=useState('30 Days');
   const chart=getPeriodChart(period);
   const labels=getPeriodLabels(period);
-  const [orders,setOrders]=useState(seedOrders);
+  const toast=useToast();
+
+  // TanStack Query: live B2B supplier orders (mvecStore + auto-refetch every 10s)
+  const {data:rawOrders,invalidate:invalidateOrders}=useLocalQuery(
+    ['supplierOrders'],
+    ()=>getOrders().filter(o=>o.orderType==='supplier'||o.supplierId),
+    {staleTime:1000*15}
+  );
+  const orders=useMemo(()=>{
+    if(rawOrders?.length)return rawOrders.map(o=>({id:o.id||o.orderNumber||`B2B-${Date.now()}`,vendor:o.vendor||o.supplierName||'',products:o.items?.[0]?.name||o.products||'',total:Number(o.total||o.totalAmount)||0,payment:o.payment||'SUCCESS',status:o.status||'Pending',settlement:o.settlementStatus||'HELD'}));
+    return seedOrders;
+  },[rawOrders]);
 
   const markShipped=(order)=>{
-    setOrders(prev=>prev.map(x=>x.id===order.id?{...x,status:'Shipped',settlement:'HELD'}:x));
+    try{updateOrder(order.id,{status:'Shipped',settlement:'HELD'});}
+    catch{}
+    invalidateOrders();
+    toast.success(`${order.id} marked as shipped.`);
   };
 
   const pendingColumns=[
@@ -305,12 +323,26 @@ function SupplierVendors(){
 
 function SupplierProducts(){
   const toast=useToast();
-  const [rows,setRows]=useState(()=>read(KEY).length?read(KEY):seeded);
+  const {data:queryRows,invalidate:invalidateProducts}=useLocalQuery(
+    ['supplierProducts'],
+    ()=>read(KEY),
+    {staleTime:1000*30}
+  );
+  // Local state mirrors the query cache so saves/deletes/status changes reflect
+  // instantly in the table; the refetch then syncs localStorage in the background.
+  const [rows,setRows]=useState(()=>{
+    const stored=read(KEY);
+    return Array.isArray(stored)&&stored.length?stored:seeded;
+  });
   const [editModal,setEditModal]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
   const [form,setForm]=useState({name:'',category:'Electronics',wholesalePrice:0,moq:1,stock:0,bulkDiscount:0,description:''});
 
-  const persist=next=>{setRows(next);localStorage.setItem(KEY,JSON.stringify(next))};
+  useEffect(()=>{
+    if(Array.isArray(queryRows)&&queryRows.length)setRows(queryRows);
+  },[queryRows]);
+
+  const persist=next=>{setRows(next);localStorage.setItem(KEY,JSON.stringify(next));invalidateProducts();};
 
   const saveProduct=()=>{
     if(!form.name){toast.error('Product name is required.');return;}

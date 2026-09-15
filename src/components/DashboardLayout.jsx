@@ -102,7 +102,7 @@ export default function DashboardLayout({admin=false,children}){
             <Icon name={theme==='dark'?'sun':'moon'}/>
             <span>{theme==='dark'?'Light mode':'Dark mode'}</span>
           </button>
-          <button className="sidebar-footer-btn" onClick={()=>{logout();navigate('/login')}}>
+          <button className="sidebar-footer-btn logout-btn" onClick={()=>{logout();navigate('/login')}}>
             <Icon name="logout"/>
             <span>Logout</span>
           </button>

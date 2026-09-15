@@ -7,4 +7,6 @@ export const usersApi = {
     client.patch(`/users/${id}`, payload).then((r) => r.data),
   getVendorCustomers: () =>
     client.get("/users/vendor/customers").then((r) => r.data),
+  search: (q, params = {}) =>
+    client.get("/users/search", { params: { q, ...params } }).then((r) => r.data),
 };

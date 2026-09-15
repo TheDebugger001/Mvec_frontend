@@ -13,6 +13,7 @@ import Payment from "./pages/Payment";
 import Profile from "./pages/Profile";
 import Orders from "./pages/Orders";
 import OrderDetails from "./pages/OrderDetails";
+import OrderConfirmation from "./pages/OrderConfirmation";
 import Vendors from "./pages/Vendors";
 import VendorDetail from "./pages/VendorDetail";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -21,6 +22,7 @@ import SupplierDashboard from "./pages/SupplierDashboard";
 import AffiliateDashboard from "./pages/AffiliateDashboard";
 import RequireAuth from "./components/RequireAuth";
 import { syncOrderLifecycle } from "./services/mvecStore";
+import Preloader from "./components/Preloader";
 
 export default function App() {
   useEffect(() => {
@@ -30,7 +32,9 @@ export default function App() {
   }, []);
 
   return (
-    <Routes>
+    <>
+      <Preloader />
+      <Routes>
       {/* ─── Public Routes ─────────────────────────────────────────────── */}
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
@@ -51,6 +55,14 @@ export default function App() {
       />
       <Route path="/checkout" element={<Checkout />} />
       <Route path="/payment/:id" element={<Payment />} />
+      <Route
+        path="/order-confirmation/:id"
+        element={
+          <RequireAuth>
+            <OrderConfirmation />
+          </RequireAuth>
+        }
+      />
       <Route
         path="/profile"
         element={
@@ -223,6 +235,7 @@ export default function App() {
 
       {/* ─── Fallback ─────────────────────────────────────────────────── */}
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }

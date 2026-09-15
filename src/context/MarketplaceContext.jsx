@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { cartApi } from '../API/cart';
+import { extractErrorMessage } from '../API/client';
 import { useAuth } from './AuthContext';
 import { useToast } from '../components/Toast';
 
@@ -85,8 +86,8 @@ export function MarketplaceProvider({ children }) {
       const res = await cartApi.add(productId, qty);
       setCart(normalizeCart(res?.cart?.items));
       toast.success('Added to cart');
-    } catch {
-      toast.error('Could not add to cart. Please try again.');
+    } catch (err) {
+      toast.error(extractErrorMessage(err) || 'Could not add to cart. Please try again.');
     }
   }, [user, toast]);
 

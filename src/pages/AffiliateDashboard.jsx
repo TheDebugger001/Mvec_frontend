@@ -1,12 +1,13 @@
-import {useState,useMemo} from 'react';
+import {useState,useMemo,useEffect} from 'react';
 import {useLocation} from 'react-router-dom';
 import DashboardLayout from '../components/DashboardLayout';
 import Icon from '../components/Icon';
 import TabGroup,{Modal} from '../components/TabGroup';
 import SmartTable from '../components/SmartTable';
 import {products} from '../data';
-import {getAffiliateWallet,requestAffiliateWithdrawal} from '../services/mvecStore';
+import {getAffiliateWallet,saveAffiliateWallet,requestAffiliateWithdrawal} from '../services/mvecStore';
 import {useToast} from '../components/Toast';
+import {useLocalQuery} from '../hooks/useLocalQuery';
 
 const KEY='mvec_affiliate_links';
 const read=()=>{try{return JSON.parse(localStorage.getItem(KEY)||"[]")}catch{return[]}};
@@ -22,10 +23,12 @@ const seedConversions=[
   {id:'CONV-003',order:'ORD-1019',product:'Portable Blender',sale:42000,commission:840,status:'Completed',date:'2026-08-24'},
   {id:'CONV-004',order:'ORD-1025',product:'ProBook 14 Laptop',sale:780000,commission:15600,status:'Completed',date:'2026-08-23'},
 ];
-const seedWallet={totalEarned:420000,available:285000,pending:135000,history:[
+const seedWallet={totalEarned:600000,available:285000,pending:135000,withdrawn:180000,history:[
   {id:'COM-001',source:'Completed order',reference:'ORD-1008',amount:1360,status:'Available',date:'2026-08-26'},
   {id:'COM-002',source:'Completed order',reference:'ORD-1019',amount:840,status:'Available',date:'2026-08-24'},
   {id:'COM-003',source:'Awaiting completion',reference:'ORD-1012',amount:1980,status:'Pending',date:'2026-08-25'},
+],withdrawals:[
+  {id:'AFF-PAY-001',amount:100000,method:'MTN MoMo',account:'+250 788 100 005',status:'Paid',requestedAt:'2026-08-21T09:00:00.000Z'},
 ]};
 const seedTopLinks=[
   {product:'Wireless Headphones',clicks:2450,conversions:42,commission:8400},
@@ -40,13 +43,17 @@ function Metric({label,value,icon,sub}){
 }
 
 function StatusBadge({status}){
-  const cls=['Active','Available','Completed','Success'].includes(status)?'active':
-             ['Suspended','Blocked','Cancelled','Failed'].includes(status)?'danger':
-             ['Pending','Processing','Draft'].includes(status)?'warning':'';
-  return <em className={'status '+cls}>{status}</em>;
+  const s=String(status||'');
+  const cls=['Active','Available','Completed','Success','Paid','Approved','Released','Clear'].includes(s)?'active':
+             ['Suspended','Blocked','Cancelled','Failed','Rejected','Out of stock'].includes(s)?'danger':
+             ['Pending','Processing','Draft','Pending review'].includes(s)?'warning':
+             s==='Investigation'||s==='On Hold'?'investigation':'';
+  return <em className={'status '+cls}>{s}</em>;
 }
 
 function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
+  const safeColumns=Array.isArray(columns)?columns:[];
+  const safeRows=Array.isArray(rows)?rows:[];
   const [sortKey,setSortKey]=useState(null);
   const [sortDir,setSortDir]=useState('asc');
   const [q,setQ]=useState('');
@@ -54,7 +61,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
   const per=8;
   
   const filtered=useMemo(()=>{
-    let result=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
+    let result=safeRows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
     if(sortKey){
       result=[...result].sort((a,b)=>{
         const va=a[sortKey],vb=b[sortKey];
@@ -63,7 +70,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
       });
     }
     return result;
-  },[rows,q,sortKey,sortDir]);
+  },[safeRows,q,sortKey,sortDir]);
   
   const totalPages=Math.max(1,Math.ceil(filtered.length/per));
   const current=Math.min(page,totalPages);
@@ -79,7 +86,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
       </div>
       <div className="data-table">
         <div className="data-row table-header">
-          {columns.map(col=>(
+          {safeColumns.map(col=>(
             <span key={col.key} className="table-label sortable" onClick={()=>{if(sortKey===col.key)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortKey(col.key);setSortDir('asc');}}}>
               {col.label}{sortKey===col.key&&(sortDir==='asc'?' ↑':' ↓')}
             </span>
@@ -90,7 +97,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
           <div className="data-row table-empty">{emptyText}</div>
         ):shown.map((r,i)=>(
           <div className="data-row" key={rowKey?rowKey(r,i):i}>
-            {columns.map(col=>(<span key={col.key}>{col.render?col.render(r):r[col.key]}</span>))}
+            {safeColumns.map(col=>(<span key={col.key}>{col.render?col.render(r):r[col.key]}</span>))}
             {actions&&<span className="row-actions">{actions(r)}</span>}
           </div>
         ))}
@@ -110,11 +117,13 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
 
 function AffiliateOverview(){
   const [tab,setTab]=useState('conversions');
-  const wallet=getAffiliateWallet();
-  const [links]=useState(read());
+  const {data:wallet}=useLocalQuery(['affiliateWallet'],getAffiliateWallet);
+  const walletData=wallet||{totalEarned:420000,available:285000,pending:135000};
+  const {data:links}=useLocalQuery(['affiliateLinks'],read);
+  const linkList=Array.isArray(links)?links:[];
   
   const recentConversions=seedConversions.slice(0,5);
-  const topLinks=links.length?links.map(l=>{
+  const topLinks=linkList.length?linkList.map(l=>{
     const p=products.find(x=>String(x.id)===String(l.productId));
     return {...l,productName:p?.name||'Unknown',amount:Number(l.amount||(Number(l.orders||0)*Number(p?.price||0)))};
   }).sort((a,b)=>b.amount-a.amount).slice(0,5):seedTopLinks;
@@ -151,8 +160,8 @@ function AffiliateOverview(){
       <div className="metric-grid">
         <Metric label="Total Clicks" value="8,420" icon="chart" sub="+18.2% this period"/>
         <Metric label="Conversions" value="184" icon="cart" sub="2.18% conversion rate"/>
-        <Metric label="Pending Earnings" value={money(wallet.pending)} icon="wallet" sub="Awaiting completion"/>
-        <Metric label="Lifetime Earned" value={money(wallet.totalEarned)} icon="wallet" sub="All time commission"/>
+        <Metric label="Pending Earnings" value={money(walletData.pending)} icon="wallet" sub="Awaiting completion"/>
+        <Metric label="Lifetime Earned" value={money(walletData.totalEarned)} icon="wallet" sub="All time commission"/>
       </div>
 
       <div className="verified-box"><b>✓ Protected commission workflow</b><p>Commission follows purchase → payment → delivery → refund window → confirmation. Once available, it moves into your wallet.</p></div>
@@ -166,24 +175,86 @@ function AffiliateOverview(){
 
 // ─── AFFILIATE WALLET ─────────────────────────────────────────────────────────
 
+// Guard against legacy/partial wallet payloads: always yield the full shape so
+// the wallet UI (and its tables) never receives undefined arrays.
+const sanitizeWallet=(w)=>{
+  const base=w&&typeof w==='object'?w:{};
+  return {
+    available:Number(base.available)||0,
+    pending:Number(base.pending)||0,
+    totalEarned:Number(base.totalEarned)||0,
+    withdrawn:Number(base.withdrawn)||0,
+    history:Array.isArray(base.history)?base.history:[],
+    withdrawals:Array.isArray(base.withdrawals)?base.withdrawals:[],
+  };
+};
+
 function AffiliateWallet(){
   const toast=useToast();
-  const [wallet]=useState(seedWallet);
+  const {data:walletData,invalidate:invalidateWallet}=useLocalQuery(['affiliateWallet'],getAffiliateWallet);
+  // Local copy of the wallet: balances and the activity ledger update instantly
+  // on withdrawal, then the query refetch keeps localStorage in sync.
+  const [wallet,setWallet]=useState(()=>sanitizeWallet(walletData||getAffiliateWallet()));
   const [withdrawModal,setWithdrawModal]=useState(false);
-  const [amount,setAmount]=useState(wallet.available);
+  const [amount,setAmount]=useState('');
   const [method,setMethod]=useState('MTN MoMo');
-  const [account,setAccount]=useState('+250 788 100 005');
+  const [account,setAccount]=useState('');
+
+  useEffect(()=>{
+    if(walletData)setWallet(sanitizeWallet(walletData));
+  },[walletData]);
 
   const submitWithdrawal=()=>{
-    if(amount<10000){toast.error('Minimum withdrawal is RWF 10,000.');return;}
-    if(amount>wallet.available){toast.error('Insufficient balance.');return;}
-    toast.success(`Withdrawal of ${money(amount)} requested.`);
+    const value=Math.round(Number(amount)||0);
+    if(!value||value<10000){toast.error('Minimum withdrawal is RWF 10,000.');return;}
+    if(value>wallet.available){toast.error('Withdrawal amount is higher than your available balance.');return;}
+    if(!account.trim()){toast.error('Please provide a payout account or phone number.');return;}
+    let request;
+    try{request=requestAffiliateWithdrawal(value,method,account.trim());}
+    catch(e){toast.error(e?.message||'Unable to request withdrawal.');return;}
+    // Apply the payout to local state immediately so the ledger and balances
+    // re-render without waiting for the background refetch.
+    setWallet(prev=>sanitizeWallet({
+      ...prev,
+      available:Number(prev.available||0)-value,
+      withdrawn:Number(prev.withdrawn||0)+value,
+      withdrawals:[request,...(prev.withdrawals||[])],
+    }));
+    invalidateWallet();
+    toast.success(`Withdrawal of ${money(value)} requested. It is pending MVEC review.`);
     setWithdrawModal(false);
+    setAmount('');
+    setAccount('');
   };
 
+  const activityRows=useMemo(()=>{
+    const commission=(wallet.history||[]).map(h=>({
+      id:h.id||`COM-${Date.now()}`,
+      type:'Commission',
+      source:h.source||'Commission',
+      reference:h.reference||'—',
+      amount:Number(h.amount)||0,
+      status:h.status||'Pending',
+      date:String(h.date||'').slice(0,10),
+    }));
+    const payouts=(wallet.withdrawals||[]).map(r=>({
+      id:r.id||`AFF-PAY-${Date.now()}`,
+      type:'Withdrawal',
+      source:`${r.method||'Payout'}`,
+      reference:r.account||'—',
+      amount:-(Number(r.amount)||0),
+      status:r.status||'Pending review',
+      date:String(r.requestedAt||'').slice(0,10),
+    }));
+    return [...payouts,...commission].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  },[wallet]);
+
   const txnColumns=[
-    {key:'id',label:'Entry'},{key:'source',label:'Source'},{key:'reference',label:'Reference'},
-    {key:'amount',label:'Amount',render:r=>money(r.amount)},{key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
+    {key:'id',label:'Entry'},
+    {key:'type',label:'Type'},
+    {key:'source',label:'Source'},
+    {key:'amount',label:'Amount',render:r=><span className={r.amount<0?'danger-text':'success-text'}>{r.amount<0?money(Math.abs(r.amount)):'+ '+money(r.amount)}</span>},
+    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
     {key:'date',label:'Date'},
   ];
 
@@ -193,24 +264,34 @@ function AffiliateWallet(){
         <div>
           <span className="eyebrow">AFFILIATE PLATFORM</span>
           <h1>Wallet</h1>
-          <p>Commission balance and wallet activity.</p>
+          <p>Commission balance and payout activity.</p>
         </div>
-        <button className="gradient-btn" onClick={()=>setWithdrawModal(true)}>Request Withdrawal</button>
+        <button
+          className="gradient-btn"
+          onClick={()=>setWithdrawModal(true)}
+          disabled={wallet.available<10000}
+          title={wallet.available<10000?'Balance is below the RWF 10,000 minimum.':''}
+        >
+          Request Withdrawal
+        </button>
       </div>
 
       <div className="metric-grid">
         <Metric label="Total Earned" value={money(wallet.totalEarned)} icon="chart" sub="Lifetime commission"/>
         <Metric label="Available Balance" value={money(wallet.available)} icon="wallet" sub="Ready for withdrawal"/>
         <Metric label="Pending Commission" value={money(wallet.pending)} icon="wallet" sub="Awaiting completion"/>
+        <Metric label="Withdrawn" value={money(wallet.withdrawn)} icon="check" sub="Paid out successfully"/>
       </div>
 
-      <DataTable columns={txnColumns} rows={wallet.history} rowKey={r=>r.id} emptyText="No wallet activity."/>
+      <div className="verified-box"><b>✓ Protected payout workflow</b><p>Withdrawals are reviewed and paid on the weekly payout cycle. The ledger below shows cleared commissions and payout requests together, newest first.</p></div>
+
+      <DataTable columns={txnColumns} rows={activityRows} rowKey={r=>r.id} emptyText="No wallet activity yet."/>
 
       <Modal open={withdrawModal} onClose={()=>setWithdrawModal(false)} title="WITHDRAWAL" subtitle="Request a payout">
         <p>Available balance: <b>{money(wallet.available)}</b>. Minimum withdrawal is RWF 10,000.</p>
-        <label className="field"><span>Amount (RWF)</span><input type="number" min="10000" step="1000" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></label>
+        <label className="field"><span>Amount (RWF)</span><input type="number" min="10000" max={wallet.available} step="1000" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="e.g. 50000"/></label>
         <label className="field"><span>Payment method</span><select value={method} onChange={e=>setMethod(e.target.value)}><option>MTN MoMo</option><option>Airtel Money</option><option>Bank account</option></select></label>
-        <label className="field"><span>Account / phone</span><input value={account} onChange={e=>setAccount(e.target.value)}/></label>
+        <label className="field"><span>Account / phone</span><input value={account} onChange={e=>setAccount(e.target.value)} placeholder="+250 7XX XXX XXX"/></label>
         <div className="modal-actions">
           <button className="outline-btn" onClick={()=>setWithdrawModal(false)}>Cancel</button>
           <button className="gradient-btn" onClick={submitWithdrawal} disabled={wallet.available<10000}>Submit Request</button>
@@ -223,19 +304,30 @@ function AffiliateWallet(){
 // ─── AFFILIATE VENDORS & SUPPLIERS ────────────────────────────────────────────
 
 function AffiliateVendors(){
-  const [links,setLinks]=useState(read());
+  const {data:linkData,invalidate:invalidateLinks}=useLocalQuery(['affiliateLinks'],read);
+  // Local copy of the link list: button states update instantly on create/copy,
+  // then the query refetch keeps localStorage/cache in sync in the background.
+  const [links,setLinks]=useState(()=>Array.isArray(linkData)?linkData:[]);
   const [copied,setCopied]=useState('');
   const [q,setQ]=useState('');
-  
+
+  useEffect(()=>{
+    if(Array.isArray(linkData))setLinks(linkData);
+  },[linkData]);
+
   const filteredProducts=useMemo(()=>products.filter(p=>`${p.name} ${p.vendor||''} ${p.category||''}`.toLowerCase().includes(q.toLowerCase())),[q]);
-  
+
+  const saveLinks=next=>{
+    setLinks(next);
+    write(next);
+    invalidateLinks();
+  };
+
   const createLink=(product)=>{
     const existing=links.find(l=>String(l.productId)===String(product.id));
     if(existing)return existing;
     const link={id:`AFF-${Date.now()}`,productId:product.id,product:product.name,code:`MV${product.id}${Date.now().toString().slice(-4)}`,clicks:0,orders:0,commission:2,amount:0,createdAt:new Date().toISOString()};
-    const next=[link,...links];
-    setLinks(next);
-    write(next);
+    saveLinks([link,...links]);
     return link;
   };
 

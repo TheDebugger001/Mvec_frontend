@@ -1,16 +1,18 @@
-import {useState,useEffect,useCallback,useMemo} from 'react';
+import {useState,useEffect,useCallback,useMemo,useRef} from 'react';
 import {Link,useLocation} from 'react-router-dom';
+import {useQueryClient} from '@tanstack/react-query';
 import DashboardLayout from '../components/DashboardLayout';
 import Icon from '../components/Icon';
 import TabGroup,{Modal,ConfirmDialog} from '../components/TabGroup';
 import SmartTable from '../components/SmartTable';
+import ModernDataTable from '../components/DataTable';
 import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from '../services/analytics';
 import {useToast} from '../components/Toast';
-import {usersApi,reportsApi} from '../API';
-import {extractErrorMessage} from '../API/client';
+import {useUsers,useUpdateUser,mapUserRow} from '../hooks/useUsers';
+import {useAllProducts} from '../hooks/useProducts';
+import {useAllOrders} from '../hooks/useOrders';
+import {queryKeys} from '../queryClient';
 
-const hasToken=()=>!!localStorage.getItem('huska_token');
-const titleCase=s=>String(s||'').toLowerCase().split('_').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
 const money=n=>new Intl.NumberFormat('en-RW').format(Number(n)||0)+' RWF';
 
 // ─── SEED DATA ────────────────────────────────────────────────────────────────
@@ -81,7 +83,9 @@ function Metric({label,value,change,icon}){
   );
 }
 
-function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
+function DataTable({columns,rows,rowKey,actions,emptyText='No records found',rowClassName,tableClassName}){
+  const safeColumns=Array.isArray(columns)?columns:[];
+  const safeRows=Array.isArray(rows)?rows:[];
   const [sortKey,setSortKey]=useState(null);
   const [sortDir,setSortDir]=useState('asc');
   const [q,setQ]=useState('');
@@ -89,7 +93,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
   const per=8;
   
   const filtered=useMemo(()=>{
-    let result=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
+    let result=safeRows.filter(r=>JSON.stringify(r).toLowerCase().includes(q.toLowerCase()));
     if(sortKey){
       result=[...result].sort((a,b)=>{
         const va=a[sortKey],vb=b[sortKey];
@@ -105,7 +109,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
   const shown=filtered.slice((current-1)*per,current*per);
   
   return (
-    <div className="data-card">
+    <div className={'data-card'+(tableClassName?' '+tableClassName:'')}>
       <div className="data-card-head">
         <div className="dash-toolbar" style={{width:'100%'}}>
           <div className="dash-filter">
@@ -117,7 +121,7 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
       </div>
       <div className="data-table">
         <div className="data-row table-header">
-          {columns.map(col=>(
+          {safeColumns.map(col=>(
             <span 
               key={col.key} 
               className="table-label sortable"
@@ -130,14 +134,17 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
         </div>
         {shown.length===0?(
           <div className="data-row table-empty">{emptyText}</div>
-        ):shown.map((r,i)=>(
-          <div className="data-row" key={rowKey?rowKey(r,i):i}>
-            {columns.map(col=>(
-              <span key={col.key}>{col.render?col.render(r):r[col.key]}</span>
-            ))}
-            {actions&&<span className="row-actions">{actions(r)}</span>}
-          </div>
-        ))}
+        ):shown.map((r,i)=>{
+          const rc=rowClassName?rowClassName(r):'';
+          return(
+            <div className={'data-row'+(rc?' '+rc:'')} key={rowKey?rowKey(r,i):i}>
+              {safeColumns.map(col=>(
+                <span key={col.key}>{col.render?col.render(r):r[col.key]}</span>
+              ))}
+              {actions&&<span className="row-actions">{actions(r)}</span>}
+            </div>
+          );
+        })}
       </div>
       {totalPages>1&&(
         <div className="pagination">
@@ -153,7 +160,8 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found'}){
 function StatusBadge({status}){
   const cls=['Active','Published','Approved','Completed','Available','Success'].includes(status)?'active':
              ['Suspended','Blocked','Rejected','Cancelled','Failed','Out of stock'].includes(status)?'danger':
-             ['Pending','Processing','Draft','Under Review','Open'].includes(status)?'warning':'';
+             ['Pending','Processing','Draft','Under Review','Open'].includes(status)?'warning':
+             status==='Investigation'?'investigation':'';
   return <em className={'status '+cls}>{status}</em>;
 }
 
@@ -167,34 +175,47 @@ function AdminOverview(){
   const labels=getPeriodLabels(chartKey);
   const periodMetrics=getPeriodMetrics(chartKey);
   const toast=useToast();
+  const queryClient=useQueryClient();
   
   const [orders,setOrders]=useState(seedOrders);
-  const [usersList,setUsersList]=useState(seedUsers);
   const [vendorsList,setVendorsList]=useState(seedVendors);
   const [suppliersList,setSuppliersList]=useState(seedSuppliers);
   const [affiliatesList,setAffiliatesList]=useState(seedAffiliates);
   const [productsList,setProductsList]=useState(seedProducts);
 
-  // Backend sync
-  useEffect(()=>{
-    if(!hasToken())return;
-    (async()=>{
-      try{
-        const r=await usersApi.getAll({limit:200});
-        if(r.data?.length){
-          setUsersList(r.data.map(u=>({id:u.id||`USR-${Date.now()}`,name:u.name||u.fullName||'',email:u.email||'',role:titleCase(u.role||''),status:titleCase(u.status||'Active'),phone:u.phone||''})));
-        }
-      }catch(e){console.warn(extractErrorMessage(e));}
-    })();
-  },[]);
+  // TanStack Query: users
+  const {data:usersRes,isLoading:usersLoading}=useUsers({limit:200});
+  const usersList=useMemo(()=>{
+    if(usersRes?.data?.length)return usersRes.data.map(mapUserRow);
+    return seedUsers;
+  },[usersRes]);
 
-  // Product actions
+  // TanStack Query: products (falls back to seed)
+  const {data:productsRes}=useAllProducts({limit:200});
+  useEffect(()=>{
+    if(productsRes?.data?.length){
+      setProductsList(productsRes.data.map(p=>({id:p._id||p.id||`PRD-${Date.now()}`,name:p.name||'',vendor:p.vendor?.name||p.vendor||'',price:Number(p.price||p.discountPrice)||0,stock:p.stockQuantity??p.stock??0,status:p.status||'Active'})));
+    }
+  },[productsRes]);
+
+  // TanStack Query: orders
+  const {data:ordersRes}=useAllOrders();
+  useEffect(()=>{
+    const list=ordersRes?.data||(Array.isArray(ordersRes)?ordersRes:null);
+    if(list?.length){
+      setOrders(list.map(o=>({id:o.orderNumber||o.orderId||o._id||`MVEC-${Date.now()}`,buyer:o.user?.name||o.buyer||'',vendor:o.vendor?.name||o.vendorName||'',total:Number(o.totalAmount||o.grandTotal||o.total)||0,payment:o.paymentStatus||'SUCCESS',status:o.status||'Processing',date:o.createdAt?.slice?.(0,10)||''})));
+    }
+  },[ordersRes]);
+
+  // Product actions (mutations invalidate cache)
   const unpublishProduct=(p)=>{
     setProductsList(prev=>prev.map(x=>x.id===p.id?{...x,status:'Unpublished'}:x));
+    queryClient.invalidateQueries({queryKey:queryKeys.products});
     toast.info(`${p.name} unpublished.`);
   };
   const deleteProduct=(p)=>{
     setProductsList(prev=>prev.filter(x=>x.id!==p.id));
+    queryClient.invalidateQueries({queryKey:queryKeys.products});
     toast.success(`${p.name} deleted.`);
   };
 
@@ -331,11 +352,14 @@ function AdminWallet(){
   const toast=useToast();
   const [tab,setTab]=useState('overview');
   const [ledger,setLedger]=useState([
-    {id:'LED-001',from:'Buyer - Aline Uwase',to:'Escrow Account',amount:850000,type:'Deposit',status:'HELD',date:'2026-08-26'},
-    {id:'LED-002',from:'Escrow Account',to:'Vendor - Kigali Tech Store',amount:765000,type:'Release',status:'RELEASED',date:'2026-08-27'},
-    {id:'LED-003',from:'Platform',to:'Commission Pool',amount:85000,type:'Commission',status:'RECORDED',date:'2026-08-27'},
-    {id:'LED-004',from:'Buyer - Jean Paul',to:'Escrow Account',amount:190000,type:'Deposit',status:'HELD',date:'2026-08-26'},
-    {id:'LED-005',from:'Escrow Account',to:'Vendor - Fashion Rwanda',amount:171000,type:'Release',status:'RELEASED',date:'2026-08-28'},
+    {id:'LED-001',actor:'Kigali Tech Store',email:'ops@kigalitech.rw',role:'Vendor',txType:'Escrow Release',from:'Escrow Account',to:'Vendor - Kigali Tech Store',amount:765000,type:'Release',status:'Released',date:'2026-08-27'},
+    {id:'LED-002',actor:'Fashion Rwanda',email:'accounts@fashionrwanda.rw',role:'Vendor',txType:'Escrow Release',from:'Escrow Account',to:'Vendor - Fashion Rwanda',amount:171000,type:'Release',status:'Released',date:'2026-08-28'},
+    {id:'LED-003',actor:'Smart Gadgets',email:'finance@smartgadgets.rw',role:'Vendor',txType:'Commission',from:'Escrow Account',to:'Commission Pool',amount:9200,type:'Commission',status:'Recorded',date:'2026-08-30'},
+    {id:'LED-004',actor:'FarmFresh Suppliers',email:'payments@farmfresh.rw',role:'Supplier',txType:'Payout',from:'Escrow Account',to:'Supplier - FarmFresh Suppliers',amount:420000,type:'Payout',status:'Pending',date:'2026-08-29'},
+    {id:'LED-005',actor:'Kigali Tech Store',email:'ops@kigalitech.rw',role:'Vendor',txType:'Payout',from:'Escrow Account',to:'Vendor - Kigali Tech Store',amount:612000,type:'Payout',status:'Processing',date:'2026-08-31'},
+    {id:'LED-006',actor:'Aline Uwase',email:'aline@example.com',role:'Buyer',txType:'Deposit',from:'Buyer - Aline Uwase',to:'Escrow Account',amount:850000,type:'Deposit',status:'Held',date:'2026-08-26'},
+    {id:'LED-007',actor:'Jean Paul',email:'jp@example.com',role:'Buyer',txType:'Deposit',from:'Buyer - Jean Paul',to:'Escrow Account',amount:190000,type:'Deposit',status:'Held',date:'2026-08-26'},
+    {id:'LED-008',actor:'Platform',email:'',role:'Platform',txType:'Commission',from:'Platform',to:'Commission Pool',amount:85000,type:'Commission',status:'Recorded',date:'2026-08-27'},
   ]);
   const [payouts,setPayouts]=useState([
     {id:'PAY-001',vendor:'Kigali Tech Store',amount:765000,method:'Bank Transfer',status:'Completed',date:'2026-08-27'},
@@ -344,10 +368,25 @@ function AdminWallet(){
   ]);
   const [holdModal,setHoldModal]=useState(null);
   const [holdReason,setHoldReason]=useState('');
+  const [ledgerFilter,setLedgerFilter]=useState('all');
 
-  const escrowTotal=ledger.filter(l=>l.status==='HELD').reduce((s,l)=>s+l.amount,0);
-  const releasedTotal=ledger.filter(l=>l.status==='RELEASED').reduce((s,l)=>s+l.amount,0);
+  const escrowTotal=ledger.filter(l=>['Held','Pending','Processing'].includes(l.status)).reduce((s,l)=>s+l.amount,0);
+  const releasedTotal=ledger.filter(l=>['Released','Completed'].includes(l.status)).reduce((s,l)=>s+l.amount,0);
   const commissionTotal=ledger.filter(l=>l.type==='Commission').reduce((s,l)=>s+l.amount,0);
+
+  const ledgerFilters=[
+    {key:'all',label:'All transactions'},
+    {key:'release',label:'Escrow Release',filter:list=>list.filter(l=>l.txType==='Escrow Release')},
+    {key:'payout',label:'Payout',filter:list=>list.filter(l=>l.txType==='Payout')},
+    {key:'commission',label:'Commission',filter:list=>list.filter(l=>l.txType==='Commission')},
+  ];
+
+  const deleteLedger=(sel)=>{
+    const ids=new Set(sel.map(r=>r.id));
+    if(!ids.size)return;
+    setLedger(l=>l.filter(x=>!ids.has(x.id)));
+    toast.success(`${ids.size} ledger entr${ids.size>1?'ies':'y'} removed.`);
+  };
 
   const executeHold=(payout)=>{
     if(!holdReason.trim()){toast.error('Please provide a reason.');return;}
@@ -363,12 +402,13 @@ function AdminWallet(){
   };
 
   const ledgerColumns=[
-    {key:'id',label:'Entry'},{key:'from',label:'From'},{key:'to',label:'To'},
-    {key:'amount',label:'Amount',render:r=>money(r.amount)},{key:'type',label:'Type'},
-    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},{key:'date',label:'Date'},
+    {key:'role',label:'Role'},
+    {key:'txType',label:'Transaction Type'},
+    {key:'amount',label:'Amount',align:'right',render:r=>money(r.amount)},
+    {key:'date',label:'Date'},
   ];
   const payoutColumns=[
-    {key:'id',label:'Payout'},{key:'vendor',label:'Vendor'},{key:'amount',label:'Amount',render:r=>money(r.amount)},
+    {key:'id',label:'Payout'},{key:'vendor',label:'Vendor'},{key:'amount',label:'Amount',align:'right',render:r=>money(r.amount)},
     {key:'method',label:'Method'},{key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},{key:'date',label:'Date'},
   ];
 
@@ -419,21 +459,42 @@ function AdminWallet(){
       )}
 
       {tab==='payouts'&&(
-        <DataTable
+        <ModernDataTable
           columns={payoutColumns}
           rows={payouts}
           rowKey={r=>r.id}
+          avatar={r=>({name:r.vendor,subtitle:r.method})}
+          searchKeys={['id','vendor','method','status']}
+          searchPlaceholder="Search vendor, payout ID…"
           actions={r=>(
             <>
               {r.status==='Pending'&&<button className="table-action-btn" title="Approve" onClick={()=>releasePayout(r)}><Icon name="check"/></button>}
               {(r.status==='Pending'||r.status==='Processing')&&<button className="table-action-btn danger" title="Hold" onClick={()=>setHoldModal(r)}><Icon name="lock"/></button>}
             </>
           )}
+          onBulkDelete={sel=>{
+            const ids=new Set(sel.map(x=>x.id));
+            setPayouts(p=>p.filter(x=>!ids.has(x.id)));
+            toast.success(`${ids.size} payout${ids.size>1?'s':''} removed.`);
+          }}
         />
       )}
 
       {tab==='ledger'&&(
-        <DataTable columns={ledgerColumns} rows={ledger} rowKey={r=>r.id}/>
+        <ModernDataTable
+          columns={ledgerColumns}
+          rows={ledger}
+          rowKey={r=>r.id}
+          filters={ledgerFilters}
+          activeFilter={ledgerFilter}
+          onFilterChange={setLedgerFilter}
+          avatar={r=>({name:r.actor,subtitle:r.email||r.role})}
+          status={r=>r.status}
+          searchKeys={['actor','email','role','txType','id','status']}
+          searchPlaceholder="Search by username, email, transaction…"
+          sortableColumns={[{key:'amount',label:'Amount'},{key:'date',label:'Date'},{key:'status',label:'Status'}]}
+          onBulkDelete={deleteLedger}
+        />
       )}
 
       <Modal open={!!holdModal} onClose={()=>setHoldModal(null)} title="ADMINISTRATIVE HOLD" subtitle={`Hold funds for ${holdModal?.id}?`}>
@@ -450,94 +511,165 @@ function AdminWallet(){
 
 // ─── ADMIN USERS & STORES ─────────────────────────────────────────────────────
 
+const STATUS_OPTIONS=[
+  {value:'Active',color:'#15815e',hoverBg:'#eafaf4'},
+  {value:'Suspended',color:'#b56a00',hoverBg:'#fff3e0'},
+  {value:'Blocked',color:'#d64545',hoverBg:'#fdf0f0'},
+  {value:'Investigation',color:'#6b7780',hoverBg:'#f0f2f3'},
+];
+const STATUS_ITEM_BG={Active:'bg-emerald-50',Suspended:'bg-orange-50',Blocked:'bg-rose-50',Investigation:'bg-slate-100'};
+
+function StatusDropdown({currentStatus,onSave}){
+  const [open,setOpen]=useState(false);
+  const ref=useRef(null);
+
+  useEffect(()=>{
+    if(!open)return;
+    const handler=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};
+    document.addEventListener('mousedown',handler);
+    return()=>document.removeEventListener('mousedown',handler);
+  },[open]);
+
+  const cur=STATUS_OPTIONS.find(o=>o.value===currentStatus)||STATUS_OPTIONS[0];
+
+  return (
+    <div className="relative z-[90] w-[140px]" ref={ref}>
+      <button
+        className={'flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-md border bg-white px-2.5 text-xs font-semibold text-[#16252d] transition-colors duration-150 '+(open?'border-[#b7d8e4]':'border-[#d8dfe6] hover:border-[#b7d8e4]')}
+        onClick={()=>setOpen(!open)}
+      >
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{background:cur.color}}/>
+        <span className="flex-1 truncate text-left">{currentStatus}</span>
+        <span className="flex items-center text-[#71808a]"><Icon name="chevron" size={12}/></span>
+      </button>
+      {open&&(
+        <div className="absolute left-0 top-[calc(100%+6px)] z-[90] flex w-[200px] flex-col rounded-[10px] border border-[#d8dfe6] bg-white p-1.5 shadow-[0_12px_32px_rgba(23,84,105,0.14)]">
+          {STATUS_OPTIONS.map(opt=>(
+            <button
+              key={opt.value}
+              className={'flex h-10 w-full cursor-pointer items-center rounded-[7px] px-3 text-left text-[12.5px] font-medium text-[#16252d] transition-colors duration-150 hover:bg-[#f3f4f6]'+(opt.value===currentStatus?' font-bold '+(STATUS_ITEM_BG[opt.value]||'bg-[#f0f2f3]'):'')}
+              onClick={()=>{onSave(opt.value);setOpen(false)}}
+            >
+              {opt.value}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminUsers(){
   const [tab,setTab]=useState('buyers');
   const toast=useToast();
-  const [usersList,setUsersList]=useState(seedUsers);
   const [vendorsList,setVendorsList]=useState(seedVendors);
   const [suppliersList,setSuppliersList]=useState(seedSuppliers);
   const [affiliatesList,setAffiliatesList]=useState(seedAffiliates);
-  const [editModal,setEditModal]=useState(null);
-  const [confirmAction,setConfirmAction]=useState(null);
-  const [commissionModal,setCommissionModal]=useState(null);
-  const [commissionRate,setCommissionRate]=useState(5);
+  const [pendingChanges,setPendingChanges]=useState({});
+  const [statusFilter,setStatusFilter]=useState('All');
+  const [confirmSaveOpen,setConfirmSaveOpen]=useState(false);
 
-  // Backend sync
-  useEffect(()=>{
-    if(!hasToken())return;
-    (async()=>{
-      try{
-        const r=await usersApi.getAll({limit:200});
-        if(r.data?.length){
-          setUsersList(r.data.map(u=>({id:u.id||`USR-${Date.now()}`,name:u.name||u.fullName||'',email:u.email||'',role:titleCase(u.role||''),status:titleCase(u.status||'Active'),phone:u.phone||''})));
-        }
-      }catch(e){console.warn(extractErrorMessage(e));}
-    })();
-  },[]);
+  // TanStack Query: users (auto-refetch + shared cache with AdminOverview)
+  const {data:usersRes}=useUsers({limit:200});
+  const usersList=useMemo(()=>{
+    if(usersRes?.data?.length)return usersRes.data.map(mapUserRow);
+    return seedUsers;
+  },[usersRes]);
 
-  const toggleStatus=(list,setList,item,newStatus)=>{
-    setList(prev=>prev.map(x=>x.id===item.id?{...x,status:newStatus}:x));
-    toast.success(`${item.name||item.id} ${newStatus.toLowerCase()}.`);
+  const stageChange=(id,newStatus)=>{
+    setPendingChanges(prev=>({...prev,[id]:newStatus}));
   };
 
-  const suspendUser=(user)=>toggleStatus(usersList,setUsersList,user,'Suspended');
-  const activateUser=(user)=>toggleStatus(usersList,setUsersList,user,'Active');
-  const blockUser=(user)=>toggleStatus(usersList,setUsersList,user,'Blocked');
+  const queryClient=useQueryClient();
+  const updateUser=useUpdateUser();
 
-  const suspendVendor=(vendor)=>toggleStatus(vendorsList,setVendorsList,vendor,'Suspended');
-  const approveVendor=(vendor)=>toggleStatus(vendorsList,setVendorsList,vendor,'Active');
+  const applyChanges=async()=>{
+    const ids=Object.keys(pendingChanges);
+    if(!ids.length)return;
+    for(const id of ids){
+      try{await updateUser.mutateAsync({id,payload:{status:pendingChanges[id]}});}
+      catch{}
+    }
+    // Write the new statuses straight into the users cache so the table text
+    // updates instantly without waiting for a background refetch.
+    queryClient.setQueryData(queryKeys.users,(old)=>{
+      const patch=new Map();
+      Object.entries(pendingChanges).forEach(([id,s])=>patch.set(id,s));
+      const apply=list=>Array.isArray(list)?list.map(u=>{
+        const uid=String(u.id||u._id);
+        return patch.has(uid)?{...u,status:patch.get(uid)}:u;
+      }):list;
+      if(old?.data)return {...old,data:apply(old.data)};
+      return apply(old);
+    });
+    queryClient.invalidateQueries({queryKey:queryKeys.users});
+    toast.success(`${ids.length} status change${ids.length>1?'s':''} saved.`);
+    setPendingChanges({});
+  };
+
+  const getEffectiveStatus=(r)=>pendingChanges[r.id]||r.status;
 
   const buyerColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Name'},{key:'email',label:'Email'},{key:'phone',label:'Phone'},
-    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
   ];
   const vendorColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Store'},{key:'category',label:'Category'},
     {key:'products',label:'Products'},{key:'rating',label:'Rating',render:r=>`★ ${r.rating}`},
-    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
   ];
   const supplierColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Supplier'},{key:'category',label:'Category'},
     {key:'products',label:'Products'},{key:'rating',label:'Rating',render:r=>`★ ${r.rating}`},
-    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
   ];
   const affiliateColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Affiliate'},{key:'email',label:'Email'},
     {key:'clicks',label:'Clicks'},{key:'conversions',label:'Conversions'},
-    {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
   ];
 
+  const deleteSelected=(sel)=>{
+    const keys=new Set(sel.map(r=>r.id||r.email));
+    if(!keys.size)return;
+    queryClient.invalidateQueries({queryKey:queryKeys.users});
+    toast.success(`${keys.size} account${keys.size>1?'s':''} deleted.`);
+  };
+
   const getTabData=()=>{
+    const filter=list=>statusFilter==='All'?list:list.filter(r=>getEffectiveStatus(r)===statusFilter);
     switch(tab){
-      case 'buyers':return {columns:buyerColumns,rows:usersList.filter(u=>u.role==='Buyer'),actions:r=>(
-        <>
-          <button className="table-action-btn" title="View" onClick={()=>setEditModal({type:'view',data:r})}><Icon name="eye"/></button>
-          {r.status==='Active'?<button className="table-action-btn warning" title="Suspend" onClick={()=>setConfirmAction({action:()=>suspendUser(r),message:`Suspend ${r.name}?`})}><Icon name="lock"/></button>:<button className="table-action-btn" title="Activate" onClick={()=>activateUser(r)}><Icon name="check"/></button>}
-          {r.status!=='Blocked'&&<button className="table-action-btn danger" title="Block" onClick={()=>setConfirmAction({action:()=>blockUser(r),message:`Block ${r.name}?`} )}><Icon name="trash"/></button>}
-        </>
-      )};
-      case 'vendors':return {columns:vendorColumns,rows:vendorsList,actions:r=>(
-        <>
-          <button className="table-action-btn" title="View" onClick={()=>setEditModal({type:'view',data:r})}><Icon name="eye"/></button>
-          {r.status==='Pending'&&<button className="table-action-btn" title="Approve" onClick={()=>approveVendor(r)}><Icon name="check"/></button>}
-          {r.status!=='Suspended'&&<button className="table-action-btn warning" title="Suspend" onClick={()=>setConfirmAction({action:()=>suspendVendor(r),message:`Suspend ${r.name}?`})}><Icon name="lock"/></button>}
-          <button className="table-action-btn" title="Commission" onClick={()=>{setCommissionModal(r);setCommissionRate(5)}}><Icon name="wallet"/></button>
-        </>
-      )};
-      case 'suppliers':return {columns:supplierColumns,rows:suppliersList,actions:r=>(
-        <button className="table-action-btn" title="View" onClick={()=>setEditModal({type:'view',data:r})}><Icon name="eye"/></button>
-      )};
-      case 'affiliates':return {columns:affiliateColumns,rows:affiliatesList,actions:r=>(
-        <>
-          <button className="table-action-btn" title="View" onClick={()=>setEditModal({type:'view',data:r})}><Icon name="eye"/></button>
-          {r.status!=='Blocked'&&<button className="table-action-btn danger" title="Block" onClick={()=>{setAffiliatesList(prev=>prev.map(x=>x.id===r.id?{...x,status:'Blocked'}:x));toast.success(`${r.name} blocked.`)}}><Icon name="trash"/></button>}
-        </>
-      )};
-      default:return {columns:buyerColumns,rows:usersList.filter(u=>u.role==='Buyer')};
+      case 'buyers':return {columns:buyerColumns,rows:filter(usersList.filter(u=>u.role==='Buyer'))};
+      case 'vendors':return {columns:vendorColumns,rows:filter(vendorsList)};
+      case 'suppliers':return {columns:supplierColumns,rows:filter(suppliersList)};
+      case 'affiliates':return {columns:affiliateColumns,rows:filter(affiliatesList)};
+      default:return {columns:buyerColumns,rows:filter(usersList.filter(u=>u.role==='Buyer'))};
     }
   };
 
-  const {columns,rows,actions}=getTabData();
+  const {columns,rows}=getTabData();
+  const hasPending=Object.keys(pendingChanges).length>0;
+
+  const statusFilterBar=(
+    <div className="status-filter-bar">
+      {['All','Active','Suspended','Blocked','Investigation'].map(s=>{
+        const opt=STATUS_OPTIONS.find(o=>o.value===s);
+        return(
+          <button
+            key={s}
+            className={'status-filter-btn'+(statusFilter===s?' active':'')}
+            style={opt?{'--sf-color':opt.color}:{}}
+            onClick={()=>setStatusFilter(s)}
+          >
+            {opt&&<span className="status-dot" style={{background:opt.color}}/>}
+            {s}
+          </button>
+        );
+      })}
+      {hasPending&&(
+        <button className="status-save-btn" onClick={()=>setConfirmSaveOpen(true)}>
+          <Icon name="check"/>
+          <span>Save {Object.keys(pendingChanges).length} change{Object.keys(pendingChanges).length>1?'s':''}</span>
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -564,29 +696,33 @@ function AdminUsers(){
           {key:'affiliates',label:'Affiliates',count:affiliatesList.length},
         ]}
         activeTab={tab} 
-        onTabChange={setTab}
+        onTabChange={(t)=>{setTab(t);setStatusFilter('All')}}
       />
 
-      <DataTable columns={columns} rows={rows} rowKey={r=>r.id||r.email} actions={actions}/>
+      {statusFilterBar}
 
-      <Modal open={!!editModal} onClose={()=>setEditModal(null)} title="ACCOUNT REVIEW" subtitle={editModal?.data?.name||editModal?.data?.id}>
-        <div className="vendor-detail-grid">
-          {editModal?.data&&Object.entries(editModal.data).filter(([k])=>k!=='id').map(([k,v])=>(
-            <div key={k}><span>{k.replace(/([A-Z])/g,' $1')}</span><b>{String(v)}</b></div>
-          ))}
-        </div>
-        <button className="gradient-btn" onClick={()=>setEditModal(null)}>Done</button>
-      </Modal>
+      <ModernDataTable
+        columns={columns}
+        rows={rows}
+        rowKey={r=>r.id||r.email}
+        avatar={r=>({name:r.name,subtitle:r.email||r.category||r.phone})}
+        status={r=>getEffectiveStatus(r)}
+        onStatusChange={(value,row)=>stageChange(row.id,value)}
+        searchKeys={['id','name','email','phone','category','products']}
+        searchPlaceholder="Search users, emails, IDs…"
+        onBulkDelete={deleteSelected}
+        rowClassName={r=>getEffectiveStatus(r)==='Investigation'?'row-investigation':''}
+      />
 
-      <ConfirmDialog open={!!confirmAction} title="Confirm Action" message={confirmAction?.message} danger onConfirm={()=>{confirmAction?.action();setConfirmAction(null)}} onCancel={()=>setConfirmAction(null)}/>
-
-      <Modal open={!!commissionModal} onClose={()=>setCommissionModal(null)} title="COMMISSION RULE" subtitle={`Set commission for ${commissionModal?.name}`}>
-        <label className="field"><span>Commission Rate (%)</span><input type="number" min="0" max="100" value={commissionRate} onChange={e=>setCommissionRate(Number(e.target.value))}/></label>
-        <div className="modal-actions">
-          <button className="outline-btn" onClick={()=>setCommissionModal(null)}>Cancel</button>
-          <button className="gradient-btn" onClick={()=>{toast.success(`Commission set to ${commissionRate}% for ${commissionModal?.name}`);setCommissionModal(null)}}>Save Rule</button>
-        </div>
-      </Modal>
+      <ConfirmDialog
+        open={confirmSaveOpen}
+        title="Save status changes"
+        message="Are you sure you want to save the changes?"
+        confirmLabel="OK"
+        cancelStyle={{border:'1px solid #dc2626',color:'#dc2626'}}
+        onConfirm={()=>{setConfirmSaveOpen(false);applyChanges();}}
+        onCancel={()=>setConfirmSaveOpen(false)}
+      />
     </>
   );
 }

@@ -58,7 +58,7 @@ export function Modal({open,title,subtitle,onClose,children,wide}){
   );
 }
 
-export function ConfirmDialog({open,title,message,onConfirm,onCancel,danger}){
+export function ConfirmDialog({open,title,message,onConfirm,onCancel,danger,confirmLabel='OK',confirmStyle,cancelStyle}){
   if(!open)return null;
   return (
     <Modal open={open} onClose={onCancel}>
@@ -67,8 +67,8 @@ export function ConfirmDialog({open,title,message,onConfirm,onCancel,danger}){
         <h2>{title}</h2>
         <p>{message}</p>
         <div className="modal-actions">
-          <button className="outline-btn" onClick={onCancel}>Cancel</button>
-          <button className={danger?'danger-btn':'gradient-btn'} onClick={onConfirm}>{danger?'Confirm':'OK'}</button>
+          <button className="outline-btn" style={cancelStyle} onClick={onCancel}>Cancel</button>
+          <button className={danger?'danger-btn':'gradient-btn'} style={confirmStyle} onClick={onConfirm}>{danger?'Confirm':confirmLabel}</button>
         </div>
       </div>
     </Modal>
