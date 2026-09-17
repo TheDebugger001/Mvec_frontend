@@ -4,7 +4,6 @@ import Icon from './Icon';
 import {useAuth} from '../context/AuthContext';
 import {useTheme} from '../context/ThemeContext';
 import {useMarketplace} from '../context/MarketplaceContext';
-import {products as seedProducts,vendors as seedVendors} from '../data';
 import {useLanguage} from '../context/LanguageContext';
 import {loadCatalog} from '../services/catalogApi';
 import {getCatalogProducts} from '../services/mvecStore';
@@ -13,8 +12,8 @@ import {rankCatalogProducts} from '../services/searchService';
 const allCategories=['Electronics','Phones','Computers','Fashion','Home & Living','Beauty','Health & Personal Care','Groceries','Food & Beverages','Baby & Kids','Sports & Fitness','Automotive','Agriculture','Tools & Hardware','Furniture','Appliances','Books & Stationery','Jewelry & Accessories','Shoes & Bags','Toys & Games','Pet Supplies','Office Supplies','Construction Materials','Garden & Outdoor','Services'];
 export default function Storefront({children}){
  const {user,logout}=useAuth();const {theme,toggleTheme}=useTheme();const {cartCount,wishlistCount}=useMarketplace();const {language,setLanguage,t}=useLanguage();const navigate=useNavigate();const [search,setSearch]=useState('');const [catOpen,setCatOpen]=useState(false);
- const [catalog,setCatalog]=useState({products:seedProducts,vendors:seedVendors});
- useEffect(()=>{let mounted=true;loadCatalog().then(cat=>{if(!mounted)return;setCatalog({products:cat.products&&cat.products.length?cat.products:seedProducts,vendors:cat.vendors&&cat.vendors.length?cat.vendors:seedVendors});});return()=>{mounted=false};},[]);
+ const [catalog,setCatalog]=useState({products:[],vendors:[]});
+ useEffect(()=>{let mounted=true;loadCatalog().then(cat=>{if(!mounted)return;setCatalog({products:cat.products||[],vendors:cat.vendors||[]});});return()=>{mounted=false};},[]);
  const catalogProducts=getCatalogProducts(catalog.products);
  const notificationPath=user?.role==='vendor'?'/vendor/notifications':user?.role==='supplier'?'/supplier/notifications':user?.role==='affiliate'?'/affiliate/notifications':user?.role==='super_admin'?'/admin/notifications':'/buyer/notifications';
  const s=search.trim().toLowerCase();

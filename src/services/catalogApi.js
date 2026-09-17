@@ -1,9 +1,4 @@
 import { productsApi, categoriesApi, vendorsApi } from '../API';
-import {
-  products as mockProducts,
-  categories as mockCategories,
-  vendors as mockVendors,
-} from '../data';
 
 let cached = null;
 let inflight = null;
@@ -36,7 +31,7 @@ export function mapBackendProduct(p) {
     vendorId: vendor._id || p.vendor || '',
     price: activePrice,
     oldPrice: discountPrice > 0 && discountPrice < rawPrice ? rawPrice : 0,
-    rating: p.averageRating || p.rating || 4,
+    rating: p.averageRating || p.rating || 0,
     reviews: p.reviewCount || p.reviews || 0,
     stock: Number(p.stockQuantity || 0),
     sku: p.sku || '',
@@ -82,19 +77,14 @@ export function mapBackendCategory(c) {
   };
 }
 
-const mergeProducts = (backendProducts) => {
-  if (!backendProducts || !backendProducts.length) return mockProducts;
-  const byName = new Set(backendProducts.map((p) => (p.name || '').toLowerCase()));
-  const extras = mockProducts.filter((p) => !byName.has((p.name || '').toLowerCase()));
-  return [...backendProducts, ...extras];
+const ordered = (items) => {
+  const seen = new Set();
+  return (items || []).filter((x) => {
+    if (!x || seen.has(String(x.id))) return false;
+    seen.add(String(x.id));
+    return true;
+  });
 };
-
-const toCache = (result) => ({
-  ...result,
-  products: mergeProducts(result.backendProducts),
-  categories: result.backendCategories && result.backendCategories.length ? result.backendCategories : mockCategories,
-  vendors: result.backendVendors && result.backendVendors.length ? result.backendVendors : mockVendors,
-});
 
 export function loadCatalog(force = false) {
   if (cached && !force) return Promise.resolve(cached);
@@ -120,11 +110,15 @@ export function loadCatalog(force = false) {
       : [];
     const backendVendors = rawVendors.map(mapBackendVendor).filter(Boolean);
 
-    cached = toCache({ backendProducts, backendCategories, backendVendors });
+    cached = {
+      products: ordered(backendProducts),
+      categories: ordered(backendCategories),
+      vendors: ordered(backendVendors),
+    };
     return cached;
   })()
     .catch(() => {
-      cached = toCache({ backendProducts: [], backendCategories: [], backendVendors: [] });
+      cached = { products: [], categories: [], vendors: [] };
       return cached;
     })
     .finally(() => {
@@ -141,5 +135,3 @@ export function clearCatalogCache() {
 export function getProductById(productsList, id) {
   return (productsList || []).find((x) => String(x.id) === String(id)) || null;
 }
-
-export { mockProducts, mockCategories, mockVendors };

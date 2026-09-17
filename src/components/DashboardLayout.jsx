@@ -3,7 +3,8 @@ import {Link,useLocation,useNavigate} from 'react-router-dom';
 import {useAuth} from '../context/AuthContext';
 import {useTheme} from '../context/ThemeContext';
 import Icon from './Icon';
-import {products,vendors} from '../data';
+import {loadCatalog} from '../services/catalogApi';
+import {getCatalogProducts} from '../services/mvecStore';
 
 export default function DashboardLayout({admin=false,children}){
   const {user,logout,effectiveRole,switchRole}=useAuth();
@@ -14,8 +15,12 @@ export default function DashboardLayout({admin=false,children}){
   const [open,setOpen]=useState(false);
   const [search,setSearch]=useState('');
   const [roleDropdown,setRoleDropdown]=useState(false);
+  const [catalogProducts,setCatalogProducts]=useState([]);
+  const [catalogVendors,setCatalogVendors]=useState([]);
   const avatar=localStorage.getItem('mvec_profile_image')||'';
   const roleRef=useRef(null);
+
+  useEffect(()=>{let mounted=true;loadCatalog().then(cat=>{if(!mounted)return;setCatalogProducts(getCatalogProducts(cat.products||[]));setCatalogVendors(cat.vendors||[]);});return()=>{mounted=false};},[]);
 
   useEffect(()=>{
     if(!roleDropdown)return;
@@ -51,8 +56,8 @@ export default function DashboardLayout({admin=false,children}){
   const items=admin&&displayRole!=='super_admin'?adminItems:role==='supplier'?supplier:role==='affiliate'?affiliate:role==='delivery'?delivery:role==='super_admin'?adminItems:seller;
 
   const searchResults=search.trim()
-    ?[...products.filter(p=>`${p.name} ${p.brand||''} ${p.vendor||''} ${p.category||''}`.toLowerCase().includes(search.toLowerCase())).slice(0,4),
-      ...vendors.filter(v=>`${v.name} ${v.category}`.toLowerCase().includes(search.toLowerCase())).slice(0,2)]
+    ?[...catalogProducts.filter(p=>`${p.name} ${p.brand||''} ${p.vendor||''} ${p.category||''}`.toLowerCase().includes(search.toLowerCase())).slice(0,4),
+      ...catalogVendors.filter(v=>`${v.name} ${v.category}`.toLowerCase().includes(search.toLowerCase())).slice(0,2)]
     :[];
 
   const goGlobalSearch=()=>{

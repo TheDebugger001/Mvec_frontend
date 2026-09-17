@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
@@ -21,16 +21,9 @@ import VendorDashboard from "./pages/VendorDashboard";
 import SupplierDashboard from "./pages/SupplierDashboard";
 import AffiliateDashboard from "./pages/AffiliateDashboard";
 import RequireAuth from "./components/RequireAuth";
-import { syncOrderLifecycle } from "./services/mvecStore";
 import Preloader from "./components/Preloader";
 
 export default function App() {
-  useEffect(() => {
-    syncOrderLifecycle();
-    const timer = setInterval(syncOrderLifecycle, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   return (
     <>
       <Preloader />

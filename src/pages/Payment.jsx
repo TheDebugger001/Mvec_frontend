@@ -1,18 +1,17 @@
 import {useState,useEffect} from "react";
 import {useNavigate,useParams} from "react-router-dom";
 import Storefront from "../components/Storefront";
-import {getOrders, createOrder, confirmPayment as confirmLocalPayment} from "../services/mvecStore";
 import {ordersApi} from "../API/orders";
 import {paymentsApi} from "../API/payments";
 import {extractErrorMessage} from "../API/client";
 import {useToast} from "../components/Toast";
 const money=n=>new Intl.NumberFormat("en-RW").format(Number(n)||0)+" RWF";
 
-const MOMO_STEPS=["USSD push sent","Approve on phone","Payment confirmed & escrow held"];
+const MOMO_STEPS=["USSD push sent","Approve on phone","Payment confirmed"];
 
 function normalizeOrder(o){
   if(!o)return null;
-    return {id:o._id||o.id,total:o.totalAmount||o.total,orderNumber:o.orderNumber,items:o.items};
+    return {id:o._id||o.id,total:o.totalAmount||o.total,orderNumber:o.orderNumber,items:o.items,deliveryOtp:o.deliveryOtp,paymentStatus:o.paymentStatus,orderStatus:o.orderStatus};
 }
 
 export default function Payment(){
@@ -24,8 +23,6 @@ export default function Payment(){
   useEffect(()=>{
     let cancelled=false;
     (async()=>{
-      const local=getOrders().find(o=>String(o.id)===String(id));
-      if(local){if(!cancelled){setOrder(normalizeOrder(local));setLoading(false);}return;}
       try{
         const res=await ordersApi.getById(id);
         if(!cancelled){setOrder(normalizeOrder(res.order));setLoading(false);}
@@ -35,35 +32,6 @@ export default function Payment(){
     })();
     return()=>{cancelled=true;};
   },[id]);
-
-  const ensureLocalOrder=(method)=>{
-    const existing=getOrders().find(o=>String(o.id)===String(id));
-    if(existing)return existing;
-    return createOrder({
-      id,
-      orderNumber:order?.orderNumber||String(id),
-      items:(order?.items||[]).map(it=>({
-        name:it.name||it.productName||"Product",
-        qty:Number(it.quantity||it.qty||1),
-        price:Number(it.price||it.unitPrice||0),
-        productId:it.product||it.productId,
-        image:it.image||"",
-      })),
-      subtotal:order?.subtotal||order?.total||0,
-      shipping:order?.shipping||0,
-      total:order?.total||0,
-      paymentMethod:String(method).toUpperCase(),
-      vendor:"Marketplace Vendor",
-    });
-  };
-
-  const finish=(method)=>{
-    ensureLocalOrder(method);
-    try{confirmLocalPayment(id,String(method).toUpperCase());}catch{}
-    setPayStage("done");
-    toast.success("Payment confirmed — your order is on its way.");
-    setTimeout(()=>navigate(`/order-confirmation/${id}`),1400);
-  };
 
   const pay=async()=>{
     setError("");
@@ -79,21 +47,18 @@ export default function Payment(){
         toast.success(res.message||"USSD prompt sent to your phone. Please approve it.");
         await new Promise(r=>setTimeout(r,1800));
         setPayStage("verifying");
-        try{await ordersApi.confirmPayment(id,method==="momo"?"MOMO":"AIRTEL");}catch{}
       }else{
         setPayStage("verifying");
-        await ordersApi.confirmPayment(id, method.toUpperCase());
       }
-      finish(method);
+      const confirmed=await ordersApi.confirmPayment(id,isMobile?(method==="momo"?"MOMO":"AIRTEL"):method.toUpperCase());
+      if(confirmed.order){setOrder(normalizeOrder(confirmed.order));}
+      setPayStage("done");
+      toast.success("Payment confirmed — your delivery OTP is ready.");
+      setTimeout(()=>navigate(`/order-confirmation/${id}`),2000);
     }catch(err){
-      // Fallback for demo / offline order IDs
-      try{
-        finish(method);
-      }catch{
-        setPayStage("idle");
-        const msg=extractErrorMessage(err);
-        setError(msg);toast.error(msg);
-      }
+      setPayStage("idle");
+      const msg=extractErrorMessage(err);
+      setError(msg);toast.error(msg);
     }
   };
 
@@ -133,6 +98,13 @@ export default function Payment(){
       )}
 
       <button className="gradient-btn full" onClick={pay} disabled={payStage!=="idle"}>{buttonLabel}</button>
-    </section><aside className="security-panel"><div className="secure-icon">✓</div><h3>How MVEC works</h3><p>For this protected-settlement flow, your payment is recorded as HELD until delivery is confirmed. In production, the actual funds must be held and released by an appropriately regulated payment/escrow partner.</p><div className="status-flow"><span>Payment</span><i>→</i><span>MVEC holds</span><i>→</i><span>Delivery</span><i>→</i><span>Release</span></div><p className="tiny">After payment, the delivery window is three hours. You may cancel within the first 30 minutes. Your delivery OTP is generated after payment and is required at the door.</p></aside></div>
+      {payStage==="done"&&order?.deliveryOtp&&(
+        <div className="verified-box otp-buyer-box">
+          <b>Your delivery OTP</b>
+          <p>Show this code to the delivery person upon arrival. It is used to confirm delivery and release payment.</p>
+          <strong className="delivery-otp">{order.deliveryOtp}</strong>
+        </div>
+      )}
+    </section><aside className="security-panel"><div className="secure-icon">✓</div><h3>How MVEC works</h3><p>For this protected-settlement flow, your payment is recorded as HELD until delivery is confirmed. In production, the actual funds must be held and released by an appropriately regulated payment/escrow partner.</p><div className="status-flow"><span>Payment</span><i>→</i><span>MVEC holds</span><i>→</i><span>Delivery</span><i>→</i><span>Release</span></div><p className="tiny">Your delivery OTP is generated after payment and is required at the door. Delivery is confirmed only after the correct code is entered.</p></aside></div>
   </main></Storefront>
 }

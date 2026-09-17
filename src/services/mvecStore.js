@@ -276,11 +276,10 @@ export function getCatalogProducts(baseProducts = []) {
 
 const WALLET_KEY = "mvec_affiliate_wallet";
 export function getAffiliateWallet() {
-  const fallback = { available: 420000, pending: 180000, totalEarned: 600000, withdrawn: 0, withdrawals: [] };
-  return read(WALLET_KEY, fallback);
+  return read(WALLET_KEY, { available: 0, pending: 0, totalEarned: 0, withdrawn: 0, withdrawals: [] });
 }
 export function saveAffiliateWallet(wallet) { write(WALLET_KEY, wallet); return wallet; }
-export function requestAffiliateWithdrawal(amount, method = "MTN MoMo", account = "+250 788 100 005") {
+export function requestAffiliateWithdrawal(amount, method = "MTN MoMo", account = "") {
   const wallet = getAffiliateWallet();
   const value = Math.round(Number(amount) || 0);
   if (value < 10000) throw new Error("The minimum withdrawal amount is RWF 10,000.");
@@ -295,10 +294,6 @@ export function requestAffiliateWithdrawal(amount, method = "MTN MoMo", account 
 const COMMISSION_RULES_KEY = 'mvec_commission_rules';
 const defaultCommissionRules = [
   {id:'RULE-DEFAULT',scope:'Platform',target:'All sales',rate:5,status:'Active'},
-  {id:'RULE-ELECTRONICS',scope:'Category',target:'Electronics',rate:5,status:'Active'},
-  {id:'RULE-VENDOR-TYPE',scope:'Vendor Type',target:'Premium Vendor',rate:4.5,status:'Active'},
-  {id:'RULE-VENDOR-1',scope:'Vendor',target:'Kigali Tech Store',rate:5,status:'Active'},
-  {id:'RULE-PROMO',scope:'Promotion',target:'Featured promotions',rate:3,status:'Active'},
 ];
 export function getCommissionRules(){ return read(COMMISSION_RULES_KEY, defaultCommissionRules); }
 export function saveCommissionRules(rules){ const normalized=(rules||[]).map(r=>({...r,rate:Number(r.rate)||0})); write(COMMISSION_RULES_KEY,normalized); localStorage.setItem('mvec_commission_rate',String(normalized.find(r=>r.scope==='Platform')?.rate ?? 5)); return normalized; }

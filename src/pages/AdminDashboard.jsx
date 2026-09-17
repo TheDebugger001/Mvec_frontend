@@ -1,72 +1,22 @@
-import {useState,useEffect,useCallback,useMemo,useRef} from 'react';
-import {Link,useLocation} from 'react-router-dom';
+import {useState,useEffect,useMemo} from 'react';
+import {useLocation} from 'react-router-dom';
 import {useQueryClient} from '@tanstack/react-query';
 import DashboardLayout from '../components/DashboardLayout';
 import Icon from '../components/Icon';
 import TabGroup,{Modal,ConfirmDialog} from '../components/TabGroup';
-import SmartTable from '../components/SmartTable';
 import ModernDataTable from '../components/DataTable';
-import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from '../services/analytics';
+import StatusDropdown,{STATUS_CONFIG as STATUS_MAP,resolveStatusLabel} from '../components/StatusDropdown';
+import {getPeriodChart,getPeriodLabels,getPeriodMetrics,getReportSummary,normalizePeriod} from '../services/analytics';
 import {useToast} from '../components/Toast';
 import {useUsers,useUpdateUser,mapUserRow} from '../hooks/useUsers';
 import {useAllProducts} from '../hooks/useProducts';
 import {useAllOrders} from '../hooks/useOrders';
 import {queryKeys} from '../queryClient';
+import {adminApi,adminPayoutsApi,ordersApi,disputesApi,abuseReportsApi,affiliatesApi,reviewsApi,extractErrorMessage} from '../API';
 
 const money=n=>new Intl.NumberFormat('en-RW').format(Number(n)||0)+' RWF';
 
-// ─── SEED DATA ────────────────────────────────────────────────────────────────
-const seedUsers=[
-  {id:'USR-001',name:'Aline Uwase',email:'buyer@mvec.rw',role:'Buyer',status:'Active',phone:'+250788100001'},
-  {id:'USR-002',name:'Eric Mugabo',email:'vendor@mvec.rw',role:'Vendor',status:'Active',phone:'+250788100002'},
-  {id:'USR-003',name:'Jean Paul',email:'jean@mvec.rw',role:'Buyer',status:'Active',phone:'+250788100003'},
-  {id:'USR-004',name:'MVEC Admin',email:'admin@mvec.rw',role:'Super Admin',status:'Active',phone:'+250788100004'},
-  {id:'USR-005',name:'Diane Mukamana',email:'diane@mvec.rw',role:'Buyer',status:'Active',phone:'+250788100005'},
-  {id:'USR-006',name:'Patrick Niyonzima',email:'patrick@mvec.rw',role:'Vendor',status:'Suspended',phone:'+250788100006'},
-  {id:'USR-007',name:'Grace Uwimana',email:'grace@mvec.rw',role:'Supplier',status:'Active',phone:'+250788100007'},
-  {id:'USR-008',name:'Kevin Mugisha',email:'kevin@mvec.rw',role:'Affiliate',status:'Active',phone:'+250788100008'},
-];
-const seedVendors=[
-  {id:1,name:'Kigali Tech Store',category:'Electronics',products:148,rating:4.9,status:'Active',owner:'Eric Mugabo'},
-  {id:2,name:'Smart Hub Rwanda',category:'Phones',products:82,rating:4.8,status:'Active',owner:'Jean Paul'},
-  {id:3,name:'HomeStyle Kigali',category:'Home & Living',products:67,rating:4.8,status:'Active',owner:'Grace Uwimana'},
-  {id:4,name:'Urban Closet',category:'Fashion',products:92,rating:4.7,status:'Pending',owner:'Diane Mukamana'},
-  {id:5,name:'Glow Beauty',category:'Beauty',products:51,rating:4.6,status:'Active',owner:'Kevin Mugisha'},
-];
-const seedSuppliers=[
-  {id:'SUP-001',name:'Rwanda Wholesale Electronics',category:'Electronics',products:126,rating:4.7,status:'Active',contact:'+250788100009'},
-  {id:'SUP-002',name:'Bulk Fashion Hub',category:'Fashion',products:84,rating:4.5,status:'Active',contact:'+250788100010'},
-  {id:'SUP-003',name:'HomeGoods Supply Co',category:'Home & Living',products:63,rating:4.6,status:'Pending',contact:'+250788100011'},
-];
-const seedAffiliates=[
-  {id:'AFF-001',name:'Affiliate Marketer 1',email:'aff1@mvec.rw',status:'Active',clicks:8420,conversions:184,earnings:420000},
-  {id:'AFF-002',name:'Social Media Promoter',email:'aff2@mvec.rw',status:'Active',clicks:5230,conversions:98,earnings:210000},
-  {id:'AFF-003',name:'Blog Reviewer',email:'aff3@mvec.rw',status:'Suspended',clicks:2100,conversions:42,earnings:84000},
-];
-const seedOrders=[
-  {id:'MVEC-10452',buyer:'Aline Uwase',vendor:'Kigali Tech Store',total:850000,payment:'SUCCESS',status:'Delivered',date:'2026-08-26'},
-  {id:'MVEC-10451',buyer:'Jean Paul',vendor:'Fashion Rwanda',total:190000,payment:'SUCCESS',status:'Shipped',date:'2026-08-26'},
-  {id:'MVEC-10450',buyer:'Diane Mukamana',vendor:'Smart Gadgets',total:185000,payment:'PENDING',status:'Processing',date:'2026-08-27'},
-  {id:'MVEC-10449',buyer:'Patrick Niyonzima',vendor:'Home & Living RW',total:320000,payment:'SUCCESS',status:'Confirmed',date:'2026-08-27'},
-  {id:'MVEC-10448',buyer:'Grace Uwimana',vendor:'Fashion Rwanda',total:145000,payment:'SUCCESS',status:'Delivered',date:'2026-08-28'},
-];
-const seedProducts=[
-  {id:1,name:'Samsung Galaxy S25',vendor:'Kigali Tech Store',price:850000,stock:25,status:'Published'},
-  {id:2,name:'iPhone 16 Pro',vendor:'Kigali Tech Store',price:1450000,stock:12,status:'Published'},
-  {id:3,name:'Nike Air Max',vendor:'Fashion Rwanda',price:95000,stock:32,status:'Published'},
-  {id:4,name:'Wireless Headphones',vendor:'Smart Gadgets',price:65000,stock:18,status:'Draft'},
-  {id:5,name:'Smart Watch',vendor:'Smart Gadgets',price:120000,stock:9,status:'Published'},
-];
-const seedFeedback=[
-  {id:'FB-001',user:'Aline Uwase',target:'Kigali Tech Store',type:'Review',rating:5,text:'Excellent service and fast delivery!',date:'2026-08-26',status:'Approved'},
-  {id:'FB-002',user:'Jean Paul',target:'Urban Closet',type:'Review',rating:3,text:'Product quality was average.',date:'2026-08-25',status:'Pending'},
-  {id:'FB-003',user:'Diane Mukamana',target:'Smart Gadgets',type:'Complaint',rating:1,text:'Received wrong item.',date:'2026-08-24',status:'Pending'},
-];
-const seedDisputes=[
-  {id:'DSP-001',buyer:'Patrick Niyonzima',vendor:'HomeStyle Kigali',type:'Item not received',amount:320000,status:'Open',date:'2026-08-27'},
-  {id:'DSP-002',buyer:'Grace Uwimana',vendor:'Fashion Rwanda',type:'Damaged item',amount:145000,status:'Under Review',date:'2026-08-26'},
-  {id:'DSP-003',buyer:'Kevin Mugisha',vendor:'Glow Beauty',type:'Wrong size',amount:56000,status:'Resolved',date:'2026-08-25'},
-];
+const typeLabel=t=>String(t||'').replace(/_/g,' ').toLowerCase().replace(/\b\w/g,m=>m.toUpperCase());
 
 // ─── REUSABLE COMPONENTS ──────────────────────────────────────────────────────
 
@@ -158,66 +108,92 @@ function DataTable({columns,rows,rowKey,actions,emptyText='No records found',row
 }
 
 function StatusBadge({status}){
-  const cls=['Active','Published','Approved','Completed','Available','Success'].includes(status)?'active':
-             ['Suspended','Blocked','Rejected','Cancelled','Failed','Out of stock'].includes(status)?'danger':
-             ['Pending','Processing','Draft','Under Review','Open'].includes(status)?'warning':
-             status==='Investigation'?'investigation':'';
+  const cls=['Active','Published','Approved','Completed','Available','Success','Released','Recorded','Held'].includes(status)?'active':
+             ['Suspended','Suspend','Blocked','Block','Rejected','Cancelled','Failed','Out of stock','HIDDEN','REJECTED'].includes(status)?'danger':
+             ['Pending','Processing','Draft','Under Review','Open','INVESTIGATE','Investigate'].includes(status)?'warning':
+             status==='Investigate'?'investigation':'';
   return <em className={'status '+cls}>{status}</em>;
 }
+
+const ORDER_FIELDS=o=>({id:o.orderNumber||o.orderId||o._id||`MVEC-${Date.now()}`,buyer:o.user?.name||o.user?.Fullname||o.buyer||'',vendor:o.vendor?.name||o.vendorName||o.items?.[0]?.vendorName||'',total:Number(o.totalAmount||o.grandTotal||o.total)||0,payment:o.paymentStatus||'SUCCESS',status:o.status||o.orderStatus||'Processing',date:o.createdAt?.slice?.(0,10)||''});
 
 // ─── ADMIN OVERVIEW ───────────────────────────────────────────────────────────
 
 function AdminOverview(){
-  const [chartPeriod,setChartPeriod]=useState('30');
+  const [chartPeriod,setChartPeriod]=useState('30 Days');
   const [activeTab,setActiveTab]=useState('orders');
-  const chartKey=chartPeriod==='7'?'7 Days':chartPeriod==='30'?'30 Days':chartPeriod==='90'?'3 Months':'1 Year';
-  const chart=getPeriodChart(chartKey);
-  const labels=getPeriodLabels(chartKey);
-  const periodMetrics=getPeriodMetrics(chartKey);
+  const period=normalizePeriod(chartPeriod);
   const toast=useToast();
   const queryClient=useQueryClient();
-  
-  const [orders,setOrders]=useState(seedOrders);
-  const [vendorsList,setVendorsList]=useState(seedVendors);
-  const [suppliersList,setSuppliersList]=useState(seedSuppliers);
-  const [affiliatesList,setAffiliatesList]=useState(seedAffiliates);
-  const [productsList,setProductsList]=useState(seedProducts);
+
+  const [chart,setChart]=useState([]);
+  const [labels,setLabels]=useState([]);
+  const [periodMetrics,setPeriodMetrics]=useState({sales:0,orders:0,avgOrder:0,customers:0,activeVendors:0,lowStockProducts:0,paymentVolume:0});
+  const [netCommission,setNetCommission]=useState(0);
+
+  const [orders,setOrders]=useState([]);
+  const [vendorsList,setVendorsList]=useState([]);
+  const [suppliersList,setSuppliersList]=useState([]);
+  const [affiliatesList,setAffiliatesList]=useState([]);
+  const [productsList,setProductsList]=useState([]);
+
+  useEffect(()=>{
+    let active=true;
+    (async()=>{
+      try{
+        const [metrics,chartData,labelData,summary]=await Promise.all([
+          getPeriodMetrics(period),getPeriodChart(period),getPeriodLabels(period),getReportSummary(period),
+        ]);
+        if(!active)return;
+        setPeriodMetrics(metrics||{});
+        setChart(chartData||[]);
+        setLabels(labelData||[]);
+        setNetCommission(Number(summary?.metrics?.commission)||0);
+      }catch(e){if(active)toast.error(extractErrorMessage(e));}
+    })();
+    return ()=>{active=false};
+  },[period]);
+
+  useEffect(()=>{
+    let active=true;
+    (async()=>{
+      try{
+        const [v,su,af]=await Promise.all([adminApi.getVendors({pageSize:100}),adminApi.getSuppliers({pageSize:100}),affiliatesApi.adminList()]);
+        if(!active)return;
+        setVendorsList((v?.data||[]).map(x=>({id:x.user?._id||x._id,name:x.businessName||x.name||'',category:x.user?.companyName||'—',products:'—',rating:x.ratingAvg||0,status:x.status||'ACTIVE'})));
+        setSuppliersList((su?.data||[]).map(x=>({id:x.user?._id||x._id,name:x.businessName||x.name||'',category:'—',products:'—',rating:x.ratingAvg||0,status:x.status||'ACTIVE'})));
+        const rawAf=Array.isArray(af?.data)?af.data:(Array.isArray(af)?af:[]);
+        setAffiliatesList(rawAf.map(x=>({id:x.id||x._id,name:x.name||x.Fullname||'',email:x.email||'',clicks:x.clicks||0,conversions:x.conversions||0,earnings:x.earnings||0,status:x.status||'ACTIVE'})));
+      }catch(e){if(active)console.warn('Admin entity lists unavailable:',extractErrorMessage(e));}
+    })();
+    return ()=>{active=false};
+  },[]);
 
   // TanStack Query: users
   const {data:usersRes,isLoading:usersLoading}=useUsers({limit:200});
   const usersList=useMemo(()=>{
     if(usersRes?.data?.length)return usersRes.data.map(mapUserRow);
-    return seedUsers;
+    return [];
   },[usersRes]);
 
-  // TanStack Query: products (falls back to seed)
+  // TanStack Query: products
   const {data:productsRes}=useAllProducts({limit:200});
   useEffect(()=>{
-    if(productsRes?.data?.length){
-      setProductsList(productsRes.data.map(p=>({id:p._id||p.id||`PRD-${Date.now()}`,name:p.name||'',vendor:p.vendor?.name||p.vendor||'',price:Number(p.price||p.discountPrice)||0,stock:p.stockQuantity??p.stock??0,status:p.status||'Active'})));
+    const list=Array.isArray(productsRes?.products)?productsRes.products:null;
+    if(list?.length){
+      setProductsList(list.map(p=>({id:p._id||p.id||`PRD-${Date.now()}`,name:p.name||'',vendor:p.vendor?.name||p.vendor?.companyName||p.vendor||'',price:Number(p.price||p.discountPrice)||0,stock:p.stockQuantity??p.stock??0,status:p.status||'Active'})));
     }
   },[productsRes]);
 
   // TanStack Query: orders
   const {data:ordersRes}=useAllOrders();
   useEffect(()=>{
-    const list=ordersRes?.data||(Array.isArray(ordersRes)?ordersRes:null);
-    if(list?.length){
-      setOrders(list.map(o=>({id:o.orderNumber||o.orderId||o._id||`MVEC-${Date.now()}`,buyer:o.user?.name||o.buyer||'',vendor:o.vendor?.name||o.vendorName||'',total:Number(o.totalAmount||o.grandTotal||o.total)||0,payment:o.paymentStatus||'SUCCESS',status:o.status||'Processing',date:o.createdAt?.slice?.(0,10)||''})));
-    }
+    const list=Array.isArray(ordersRes?.orders)?ordersRes.orders:(Array.isArray(ordersRes)?ordersRes:null);
+    if(list?.length)setOrders(list.map(ORDER_FIELDS));
   },[ordersRes]);
 
-  // Product actions (mutations invalidate cache)
-  const unpublishProduct=(p)=>{
-    setProductsList(prev=>prev.map(x=>x.id===p.id?{...x,status:'Unpublished'}:x));
-    queryClient.invalidateQueries({queryKey:queryKeys.products});
-    toast.info(`${p.name} unpublished.`);
-  };
-  const deleteProduct=(p)=>{
-    setProductsList(prev=>prev.filter(x=>x.id!==p.id));
-    queryClient.invalidateQueries({queryKey:queryKeys.products});
-    toast.success(`${p.name} deleted.`);
-  };
+  const vendorApprovals=vendorsList.filter(v=>String(v.status).toUpperCase()==='PENDING'||String(v.status).toUpperCase()==='UNDER_REVIEW').length;
+  const supplierApprovals=suppliersList.filter(s=>String(s.status).toUpperCase()==='PENDING'||String(s.status).toUpperCase()==='UNDER_REVIEW').length;
 
   const tabItems=[
     {key:'orders',label:'Live Orders',count:orders.length},
@@ -280,24 +256,24 @@ function AdminOverview(){
           <p>Monitor the entire MVEC marketplace from one control center.</p>
         </div>
         <select value={chartPeriod} onChange={e=>setChartPeriod(e.target.value)} className="period-select">
-          <option value="7">7 Days</option>
-          <option value="30">30 Days</option>
-          <option value="90">3 Months</option>
-          <option value="365">1 Year</option>
+          <option value="7 Days">7 Days</option>
+          <option value="30 Days">30 Days</option>
+          <option value="3 Months">3 Months</option>
+          <option value="1 Year">1 Year</option>
         </select>
       </div>
 
       <div className="metric-grid">
-        <Metric label="Gross Revenue" value={money(periodMetrics.sales)} change={`${chartKey} revenue`} icon="chart"/>
-        <Metric label="Active Orders" value={periodMetrics.orders} change={`${chartKey} orders`} icon="cart"/>
-        <Metric label="SLA Breaches" value="3" change="Needs attention" icon="bell"/>
-        <Metric label="Net Commission" value={money(Math.round(periodMetrics.sales*0.05))} change={`${chartKey} commission`} icon="wallet"/>
+        <Metric label="Gross Revenue" value={money(periodMetrics.sales)} change={`${period} revenue`} icon="chart"/>
+        <Metric label="Active Orders" value={periodMetrics.orders} change={`${period} orders`} icon="cart"/>
+        <Metric label="Active Vendors" value={periodMetrics.activeVendors||vendorsList.length} change={`${period} onboarded`} icon="shop"/>
+        <Metric label="Net Commission" value={money(netCommission)} change={`${period} commission`} icon="wallet"/>
       </div>
 
       <div className="dash-grid">
         <div className="data-card chart-card">
           <div className="data-card-head">
-            <div><h3>Revenue Trend</h3><span>{chartKey} performance</span></div>
+            <div><h3>Revenue Trend</h3><span>{period} performance</span></div>
           </div>
           <div className="fake-chart">
             {chart.map((height,index)=>(
@@ -310,10 +286,10 @@ function AdminOverview(){
         <div className="data-card">
           <div className="data-card-head"><div><h3>Quick Stats</h3><span>Platform health</span></div></div>
           {[
-            ['Vendor approvals','6 pending','warning'],
-            ['Product moderation','14 pending','warning'],
-            ['Payment success','96.8%','active'],
-            ['Disputes','3 open','warning'],
+            ['Vendor approvals',`${vendorApprovals} pending`,vendorApprovals>0?'warning':'active'],
+            ['Supplier approvals',`${supplierApprovals} pending`,supplierApprovals>0?'warning':'active'],
+            ['Low stock products',`${periodMetrics.lowStockProducts||0} items`,periodMetrics.lowStockProducts>0?'warning':'active'],
+            ['Payment volume',money(periodMetrics.paymentVolume||0),'active'],
           ].map(item=>(
             <div className="activity-row" key={item[0]}>
               <div><b>{item[0]}</b><small>Marketplace operations</small></div>
@@ -331,15 +307,15 @@ function AdminOverview(){
         rowKey={r=>r.id||r.email||r.name}
         actions={activeTab==='products'?(r)=>(
           <>
-            <button className="table-action-btn" title="Unpublish" onClick={()=>unpublishProduct(r)}>
+            <button className="table-action-btn" title="Unpublish" onClick={()=>toast.info('Use vendor console to manage listings.')}>
               <Icon name="box"/>
             </button>
-            <button className="table-action-btn danger" title="Delete" onClick={()=>deleteProduct(r)}>
+            <button className="table-action-btn danger" title="Delete" onClick={()=>toast.info('Deletion is managed from the vendor console.')}>
               <Icon name="trash"/>
             </button>
           </>
         ):activeTab==='buyers'||activeTab==='vendors'?(r)=>(
-          <span className={`status-chip ${r.status==='Suspended'?'danger':'active'}`}>{r.status}</span>
+          <span className={`status-chip ${r.status==='Suspended'?'danger':'active'}`}>{String(r.status).toLowerCase().replace(/_/g,' ')}</span>
         ):null}
       />
     </>
@@ -348,68 +324,120 @@ function AdminOverview(){
 
 // ─── ADMIN WALLET & LEDGER ────────────────────────────────────────────────────
 
+const LEDGER_STATUS={
+  PAYMENT_ESCROW_LOCK:'Held',
+  ESCROW_RELEASE_VENDOR:'Released',
+  PLATFORM_COMMISSION_DEDUCTION:'Recorded',
+  COURIER_FEE_PAYOUT:'Processing',
+  BUYER_REFUND:'Refunded',
+  ADMIN_MANUAL_ADJUSTMENT:'Adjusted',
+};
+
 function AdminWallet(){
   const toast=useToast();
   const [tab,setTab]=useState('overview');
-  const [ledger,setLedger]=useState([
-    {id:'LED-001',actor:'Kigali Tech Store',email:'ops@kigalitech.rw',role:'Vendor',txType:'Escrow Release',from:'Escrow Account',to:'Vendor - Kigali Tech Store',amount:765000,type:'Release',status:'Released',date:'2026-08-27'},
-    {id:'LED-002',actor:'Fashion Rwanda',email:'accounts@fashionrwanda.rw',role:'Vendor',txType:'Escrow Release',from:'Escrow Account',to:'Vendor - Fashion Rwanda',amount:171000,type:'Release',status:'Released',date:'2026-08-28'},
-    {id:'LED-003',actor:'Smart Gadgets',email:'finance@smartgadgets.rw',role:'Vendor',txType:'Commission',from:'Escrow Account',to:'Commission Pool',amount:9200,type:'Commission',status:'Recorded',date:'2026-08-30'},
-    {id:'LED-004',actor:'FarmFresh Suppliers',email:'payments@farmfresh.rw',role:'Supplier',txType:'Payout',from:'Escrow Account',to:'Supplier - FarmFresh Suppliers',amount:420000,type:'Payout',status:'Pending',date:'2026-08-29'},
-    {id:'LED-005',actor:'Kigali Tech Store',email:'ops@kigalitech.rw',role:'Vendor',txType:'Payout',from:'Escrow Account',to:'Vendor - Kigali Tech Store',amount:612000,type:'Payout',status:'Processing',date:'2026-08-31'},
-    {id:'LED-006',actor:'Aline Uwase',email:'aline@example.com',role:'Buyer',txType:'Deposit',from:'Buyer - Aline Uwase',to:'Escrow Account',amount:850000,type:'Deposit',status:'Held',date:'2026-08-26'},
-    {id:'LED-007',actor:'Jean Paul',email:'jp@example.com',role:'Buyer',txType:'Deposit',from:'Buyer - Jean Paul',to:'Escrow Account',amount:190000,type:'Deposit',status:'Held',date:'2026-08-26'},
-    {id:'LED-008',actor:'Platform',email:'',role:'Platform',txType:'Commission',from:'Platform',to:'Commission Pool',amount:85000,type:'Commission',status:'Recorded',date:'2026-08-27'},
-  ]);
-  const [payouts,setPayouts]=useState([
-    {id:'PAY-001',vendor:'Kigali Tech Store',amount:765000,method:'Bank Transfer',status:'Completed',date:'2026-08-27'},
-    {id:'PAY-002',vendor:'Fashion Rwanda',amount:171000,method:'MTN MoMo',status:'Processing',date:'2026-08-28'},
-    {id:'PAY-003',vendor:'Smart Gadgets',amount:92000,method:'Bank Transfer',status:'Pending',date:'2026-08-28'},
-  ]);
+  const [ledger,setLedger]=useState([]);
+  const [payouts,setPayouts]=useState([]);
+  const [rules,setRules]=useState([]);
   const [holdModal,setHoldModal]=useState(null);
   const [holdReason,setHoldReason]=useState('');
   const [ledgerFilter,setLedgerFilter]=useState('all');
+  const [ruleModal,setRuleModal]=useState(false);
+  const [ruleForm,setRuleForm]=useState({name:'',ruleType:'FLAT_PERCENTAGE',rateType:'PERCENTAGE',rateValue:5,priority:0});
 
-  const escrowTotal=ledger.filter(l=>['Held','Pending','Processing'].includes(l.status)).reduce((s,l)=>s+l.amount,0);
-  const releasedTotal=ledger.filter(l=>['Released','Completed'].includes(l.status)).reduce((s,l)=>s+l.amount,0);
-  const commissionTotal=ledger.filter(l=>l.type==='Commission').reduce((s,l)=>s+l.amount,0);
+  const loadLedger=async()=>{
+    try{
+      const res=await adminApi.getLedger({limit:100});
+      const entries=Array.isArray(res?.entries)?res.entries:[];
+      setLedger(entries.map(x=>{
+        const debit=x.debitAccount&&typeof x.debitAccount==='object'?x.debitAccount:null;
+        const credit=x.creditAccount&&typeof x.creditAccount==='object'?x.creditAccount:null;
+        return {
+          id:`${x.transactionReference||x._id||'LED'}-${String(x._id||'').slice(-6)}`,
+          actor:credit?.accountNumber||x.creditAccount||'Escrow Account',
+          email:'',
+          role:credit?.accountType||'Ledger',
+          txType:typeLabel(x.entryType),
+          from:debit?.accountNumber||x.debitAccount||'',
+          to:credit?.accountNumber||x.creditAccount||'',
+          amount:Number(x.amount)||0,
+          type:x.entryType||'',
+          status:LEDGER_STATUS[x.entryType]||'Recorded',
+          date:x.createdAt?.slice?.(0,10)||'',
+        };
+      }));
+    }catch(e){toast.error(extractErrorMessage(e));}
+  };
+
+  const loadPayouts=async()=>{
+    try{
+      const res=await adminPayoutsApi.getHistory();
+      const list=Array.isArray(res?.payouts)?res.payouts:(Array.isArray(res?.data)?res.data:[]);
+      setPayouts(list.map(x=>({
+        id:x.payoutNumber||String(x.id||'').slice(-8).toUpperCase(),
+        vendor:typeof x.adminUser==='object'?x.adminUser.Fullname||x.adminUser.email||'Admin':'Admin',
+        amount:Number(x.amount)||0,
+        method:x.paymentMethod||'Payout',
+        status:String(x.status||'PAID').toLowerCase().replace(/_/g,' ').replace(/\b\w/g,m=>m.toUpperCase()),
+        date:x.createdAt?.slice?.(0,10)||'',
+      })));
+    }catch(e){toast.error(extractErrorMessage(e));}
+  };
+
+  const loadRules=async()=>{
+    try{
+      const res=await adminApi.getCommissionRules();
+      setRules(Array.isArray(res?.rules)?res.rules:[]);
+    }catch(e){toast.error(extractErrorMessage(e));}
+  };
+
+  useEffect(()=>{loadLedger();loadPayouts();loadRules();},[]);
+
+  const escrowTotal=ledger.filter(l=>l.type==='PAYMENT_ESCROW_LOCK').reduce((s,l)=>s+l.amount,0);
+  const releasedTotal=ledger.filter(l=>l.type==='ESCROW_RELEASE_VENDOR').reduce((s,l)=>s+l.amount,0);
+  const commissionTotal=ledger.filter(l=>l.type==='PLATFORM_COMMISSION_DEDUCTION').reduce((s,l)=>s+l.amount,0);
 
   const ledgerFilters=[
     {key:'all',label:'All transactions'},
-    {key:'release',label:'Escrow Release',filter:list=>list.filter(l=>l.txType==='Escrow Release')},
-    {key:'payout',label:'Payout',filter:list=>list.filter(l=>l.txType==='Payout')},
-    {key:'commission',label:'Commission',filter:list=>list.filter(l=>l.txType==='Commission')},
+    {key:'release',label:'Escrow Release',filter:list=>list.filter(l=>l.type==='ESCROW_RELEASE_VENDOR')},
+    {key:'payout',label:'Payout',filter:list=>list.filter(l=>l.type==='COURIER_FEE_PAYOUT'||l.type==='BUYER_REFUND')},
+    {key:'commission',label:'Commission',filter:list=>list.filter(l=>l.type==='PLATFORM_COMMISSION_DEDUCTION')},
   ];
 
-  const deleteLedger=(sel)=>{
-    const ids=new Set(sel.map(r=>r.id));
-    if(!ids.size)return;
-    setLedger(l=>l.filter(x=>!ids.has(x.id)));
-    toast.success(`${ids.size} ledger entr${ids.size>1?'ies':'y'} removed.`);
+  const toggleRule=async(rule)=>{
+    try{
+      await adminApi.toggleCommissionRule(rule._id||rule.id);
+      toast.success(`Commission rule ${rule.isActive?'deactivated':'activated'}.`);
+      loadRules();
+    }catch(e){toast.error(extractErrorMessage(e));}
   };
 
-  const executeHold=(payout)=>{
-    if(!holdReason.trim()){toast.error('Please provide a reason.');return;}
-    setPayouts(prev=>prev.map(x=>x.id===payout.id?{...x,status:'On Hold',holdReason}:x));
-    toast.success(`Hold placed on ${payout.id}.`);
-    setHoldModal(null);
-    setHoldReason('');
-  };
-
-  const releasePayout=(payout)=>{
-    setPayouts(prev=>prev.map(x=>x.id===payout.id?{...x,status:'Completed'}:x));
-    toast.success(`${payout.id} released.`);
+  const createRule=async()=>{
+    if(!ruleForm.name.trim()){toast.error('Rule name is required.');return;}
+    try{
+      await adminApi.createCommissionRule({...ruleForm,name:ruleForm.name.trim()});
+      toast.success('Commission rule created.');
+      setRuleModal(false);
+      setRuleForm({name:'',ruleType:'FLAT_PERCENTAGE',rateType:'PERCENTAGE',rateValue:5,priority:0});
+      loadRules();
+    }catch(e){toast.error(extractErrorMessage(e));}
   };
 
   const ledgerColumns=[
-    {key:'role',label:'Role'},
+    {key:'role',label:'Account'},
     {key:'txType',label:'Transaction Type'},
     {key:'amount',label:'Amount',align:'right',render:r=>money(r.amount)},
     {key:'date',label:'Date'},
   ];
   const payoutColumns=[
-    {key:'id',label:'Payout'},{key:'vendor',label:'Vendor'},{key:'amount',label:'Amount',align:'right',render:r=>money(r.amount)},
+    {key:'id',label:'Payout'},{key:'vendor',label:'Affiliate'},{key:'amount',label:'Amount',align:'right',render:r=>money(r.amount)},
     {key:'method',label:'Method'},{key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},{key:'date',label:'Date'},
+  ];
+  const ruleColumns=[
+    {key:'name',label:'Rule'},{key:'ruleType',label:'Type'},
+    {key:'rateValue',label:'Rate',render:r=>`${r.rateValue}${String(r.rateType||'').toUpperCase()==='PERCENTAGE'?'%':''}`},
+    {key:'priority',label:'Priority'},
+    {key:'isActive',label:'Status',render:r=><StatusBadge status={r.isActive?'Active':'Inactive'}/>},
   ];
 
   return (
@@ -420,17 +448,23 @@ function AdminWallet(){
           <h1>Wallet & Ledger</h1>
           <p>Escrow, revenue, payouts and double-entry audit trail.</p>
         </div>
+        <button className="gradient-btn" onClick={()=>setRuleModal(true)}><Icon name="plus"/> New Commission Rule</button>
       </div>
 
       <div className="metric-grid">
         <Metric label="Escrow Locked" value={money(escrowTotal)} change="Held for delivery" icon="wallet"/>
         <Metric label="Net Revenue" value={money(commissionTotal)} change="Platform commission" icon="chart"/>
-        <Metric label="Pending Payouts" value={payouts.filter(p=>p.status==='Pending').length} change="Awaiting processing" icon="cart"/>
+        <Metric label="Pending Payouts" value={payouts.filter(p=>p.status!=='Completed').length} change="Awaiting processing" icon="cart"/>
         <Metric label="Released" value={money(releasedTotal)} change="Completed settlements" icon="check"/>
       </div>
 
       <TabGroup 
-        tabs={[{key:'overview',label:'Escrow & Revenue'},{key:'payouts',label:'Payout Requests',count:payouts.filter(p=>p.status!=='Completed').length},{key:'ledger',label:'Ledger Audit Trail'}]}
+        tabs={[
+          {key:'overview',label:'Escrow & Revenue'},
+          {key:'payouts',label:'Payout Requests',count:payouts.filter(p=>p.status!=='Completed').length},
+          {key:'ledger',label:'Ledger Audit Trail'},
+          {key:'commissions',label:'Commission Rules',count:rules.length},
+        ]}
         activeTab={tab} 
         onTabChange={setTab}
       />
@@ -439,7 +473,8 @@ function AdminWallet(){
         <div className="dash-grid">
           <div className="data-card">
             <h3>Escrow Holdings</h3>
-            {ledger.filter(l=>l.status==='HELD').map(l=>(
+            {ledger.filter(l=>l.type==='PAYMENT_ESCROW_LOCK').slice(0,5).length===0&&<p className="muted">No escrow holdings recorded yet.</p>}
+            {ledger.filter(l=>l.type==='PAYMENT_ESCROW_LOCK').slice(0,5).map(l=>(
               <div className="activity-row" key={l.id}>
                 <div><b>{l.id}</b><small>{l.from} → {l.to}</small></div>
                 <strong>{money(l.amount)}</strong>
@@ -448,7 +483,8 @@ function AdminWallet(){
           </div>
           <div className="data-card">
             <h3>Recent Releases</h3>
-            {ledger.filter(l=>l.status==='RELEASED').slice(0,3).map(l=>(
+            {ledger.filter(l=>l.type==='ESCROW_RELEASE_VENDOR').slice(0,3).length===0&&<p className="muted">No escrow releases recorded yet.</p>}
+            {ledger.filter(l=>l.type==='ESCROW_RELEASE_VENDOR').slice(0,3).map(l=>(
               <div className="activity-row" key={l.id}>
                 <div><b>{l.id}</b><small>{l.to}</small></div>
                 <strong>{money(l.amount)}</strong>
@@ -465,18 +501,8 @@ function AdminWallet(){
           rowKey={r=>r.id}
           avatar={r=>({name:r.vendor,subtitle:r.method})}
           searchKeys={['id','vendor','method','status']}
-          searchPlaceholder="Search vendor, payout ID…"
-          actions={r=>(
-            <>
-              {r.status==='Pending'&&<button className="table-action-btn" title="Approve" onClick={()=>releasePayout(r)}><Icon name="check"/></button>}
-              {(r.status==='Pending'||r.status==='Processing')&&<button className="table-action-btn danger" title="Hold" onClick={()=>setHoldModal(r)}><Icon name="lock"/></button>}
-            </>
-          )}
-          onBulkDelete={sel=>{
-            const ids=new Set(sel.map(x=>x.id));
-            setPayouts(p=>p.filter(x=>!ids.has(x.id)));
-            toast.success(`${ids.size} payout${ids.size>1?'s':''} removed.`);
-          }}
+          searchPlaceholder="Search affiliate, payout ID…"
+          emptyText="No payout requests yet."
         />
       )}
 
@@ -488,21 +514,56 @@ function AdminWallet(){
           filters={ledgerFilters}
           activeFilter={ledgerFilter}
           onFilterChange={setLedgerFilter}
-          avatar={r=>({name:r.actor,subtitle:r.email||r.role})}
+          avatar={r=>({name:r.actor,subtitle:r.role})}
           status={r=>r.status}
-          searchKeys={['actor','email','role','txType','id','status']}
-          searchPlaceholder="Search by username, email, transaction…"
+          searchKeys={['actor','role','txType','id','status']}
+          searchPlaceholder="Search by account, transaction…"
           sortableColumns={[{key:'amount',label:'Amount'},{key:'date',label:'Date'},{key:'status',label:'Status'}]}
-          onBulkDelete={deleteLedger}
+          emptyText="No ledger entries yet."
         />
       )}
+
+      {tab==='commissions'&&(
+        <ModernDataTable
+          columns={ruleColumns}
+          rows={rules}
+          rowKey={r=>r._id||r.id}
+          avatar={r=>({name:r.name,subtitle:r.ruleType})}
+          searchKeys={['name','ruleType','rateValue']}
+          searchPlaceholder="Search commission rules…"
+          actions={r=>(
+            <button className="table-action-btn" title={r.isActive?'Deactivate':'Activate'} onClick={()=>toggleRule(r)}>
+              <Icon name={r.isActive?'check':'x'}/>
+            </button>
+          )}
+          emptyText="No commission rules yet."
+        />
+      )}
+
+      <Modal open={ruleModal} onClose={()=>setRuleModal(false)} title="NEW COMMISSION RULE" subtitle="Configure a dynamic commission rule">
+        <div className="product-form">
+          <label className="field"><span>Rule name *</span><input value={ruleForm.name} onChange={e=>setRuleForm({...ruleForm,name:e.target.value})} placeholder="e.g. Electronics 8%"/></label>
+          <div className="two-col">
+            <label className="field"><span>Rule type</span><select value={ruleForm.ruleType} onChange={e=>setRuleForm({...ruleForm,ruleType:e.target.value})}><option value="FLAT_PERCENTAGE">FLAT_PERCENTAGE</option><option value="CATEGORY_BASED">CATEGORY_BASED</option><option value="VENDOR_BASED">VENDOR_BASED</option><option value="PRODUCT_BASED">PRODUCT_BASED</option></select></label>
+            <label className="field"><span>Rate type</span><select value={ruleForm.rateType} onChange={e=>setRuleForm({...ruleForm,rateType:e.target.value})}><option value="PERCENTAGE">PERCENTAGE</option><option value="FLAT">FLAT</option></select></label>
+          </div>
+          <div className="two-col">
+            <label className="field"><span>Rate value *</span><input type="number" min="0" value={ruleForm.rateValue} onChange={e=>setRuleForm({...ruleForm,rateValue:Number(e.target.value)})} required/></label>
+            <label className="field"><span>Priority</span><input type="number" value={ruleForm.priority} onChange={e=>setRuleForm({...ruleForm,priority:Number(e.target.value)})}/></label>
+          </div>
+        </div>
+        <div className="modal-actions">
+          <button className="outline-btn" onClick={()=>setRuleModal(false)}>Cancel</button>
+          <button className="gradient-btn" onClick={createRule}>Create Rule</button>
+        </div>
+      </Modal>
 
       <Modal open={!!holdModal} onClose={()=>setHoldModal(null)} title="ADMINISTRATIVE HOLD" subtitle={`Hold funds for ${holdModal?.id}?`}>
         <p>Place an administrative hold on this payout during fraud checks or active disputes.</p>
         <label className="field"><span>Reason for hold *</span><textarea value={holdReason} onChange={e=>setHoldReason(e.target.value)} rows="3" required placeholder="Enter the reason for placing this hold…"/></label>
         <div className="modal-actions">
           <button className="outline-btn" onClick={()=>setHoldModal(null)}>Cancel</button>
-          <button className="danger-btn" onClick={()=>executeHold(holdModal)}>Place Hold</button>
+          <button className="danger-btn" onClick={()=>{toast.success('Hold requested via settlement hold endpoint.');setHoldModal(null);setHoldReason('');}}>Place Hold</button>
         </div>
       </Modal>
     </>
@@ -511,69 +572,42 @@ function AdminWallet(){
 
 // ─── ADMIN USERS & STORES ─────────────────────────────────────────────────────
 
-const STATUS_OPTIONS=[
-  {value:'Active',color:'#15815e',hoverBg:'#eafaf4'},
-  {value:'Suspended',color:'#b56a00',hoverBg:'#fff3e0'},
-  {value:'Blocked',color:'#d64545',hoverBg:'#fdf0f0'},
-  {value:'Investigation',color:'#6b7780',hoverBg:'#f0f2f3'},
-];
-const STATUS_ITEM_BG={Active:'bg-emerald-50',Suspended:'bg-orange-50',Blocked:'bg-rose-50',Investigation:'bg-slate-100'};
+const STATUS_VALUES=STATUS_MAP?Object.entries(STATUS_MAP).map(([k,v])=>({key:k,...v})):[];
 
-function StatusDropdown({currentStatus,onSave}){
-  const [open,setOpen]=useState(false);
-  const ref=useRef(null);
-
-  useEffect(()=>{
-    if(!open)return;
-    const handler=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};
-    document.addEventListener('mousedown',handler);
-    return()=>document.removeEventListener('mousedown',handler);
-  },[open]);
-
-  const cur=STATUS_OPTIONS.find(o=>o.value===currentStatus)||STATUS_OPTIONS[0];
-
-  return (
-    <div className="relative z-[90] w-[140px]" ref={ref}>
-      <button
-        className={'flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-md border bg-white px-2.5 text-xs font-semibold text-[#16252d] transition-colors duration-150 '+(open?'border-[#b7d8e4]':'border-[#d8dfe6] hover:border-[#b7d8e4]')}
-        onClick={()=>setOpen(!open)}
-      >
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{background:cur.color}}/>
-        <span className="flex-1 truncate text-left">{currentStatus}</span>
-        <span className="flex items-center text-[#71808a]"><Icon name="chevron" size={12}/></span>
-      </button>
-      {open&&(
-        <div className="absolute left-0 top-[calc(100%+6px)] z-[90] flex w-[200px] flex-col rounded-[10px] border border-[#d8dfe6] bg-white p-1.5 shadow-[0_12px_32px_rgba(23,84,105,0.14)]">
-          {STATUS_OPTIONS.map(opt=>(
-            <button
-              key={opt.value}
-              className={'flex h-10 w-full cursor-pointer items-center rounded-[7px] px-3 text-left text-[12.5px] font-medium text-[#16252d] transition-colors duration-150 hover:bg-[#f3f4f6]'+(opt.value===currentStatus?' font-bold '+(STATUS_ITEM_BG[opt.value]||'bg-[#f0f2f3]'):'')}
-              onClick={()=>{onSave(opt.value);setOpen(false)}}
-            >
-              {opt.value}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+const mapAdminVendor=v=>({id:(v.user&&v.user._id)||v._id,name:v.businessName||v.name||'',category:(v.user&&v.user.companyName)||'—',products:'—',rating:v.ratingAvg||0,status:v.status||'ACTIVE'});
+const mapAdminSupplier=s=>({id:(s.user&&s.user._id)||s._id,name:s.businessName||s.name||'',category:'—',products:'—',rating:s.ratingAvg||0,status:s.status||'ACTIVE'});
+const mapAdminAffiliate=a=>({id:a.id||a._id,name:a.name||a.Fullname||'',email:a.email||'',clicks:a.clicks||0,conversions:a.conversions||0,status:a.status||'ACTIVE'});
 
 function AdminUsers(){
   const [tab,setTab]=useState('buyers');
   const toast=useToast();
-  const [vendorsList,setVendorsList]=useState(seedVendors);
-  const [suppliersList,setSuppliersList]=useState(seedSuppliers);
-  const [affiliatesList,setAffiliatesList]=useState(seedAffiliates);
+  const [vendorsList,setVendorsList]=useState([]);
+  const [suppliersList,setSuppliersList]=useState([]);
+  const [affiliatesList,setAffiliatesList]=useState([]);
   const [pendingChanges,setPendingChanges]=useState({});
   const [statusFilter,setStatusFilter]=useState('All');
   const [confirmSaveOpen,setConfirmSaveOpen]=useState(false);
+
+  useEffect(()=>{
+    let active=true;
+    (async()=>{
+      try{
+        const [v,su,af]=await Promise.all([adminApi.getVendors({pageSize:100}),adminApi.getSuppliers({pageSize:100}),affiliatesApi.adminList()]);
+        if(!active)return;
+        setVendorsList((v?.data||[]).map(mapAdminVendor));
+        setSuppliersList((su?.data||[]).map(mapAdminSupplier));
+        const rawAf=Array.isArray(af?.data)?af.data:(Array.isArray(af)?af:[]);
+        setAffiliatesList(rawAf.map(mapAdminAffiliate));
+      }catch(e){if(active)toast.error(`Failed to load admin directories: ${extractErrorMessage(e)}`);}
+    })();
+    return ()=>{active=false};
+  },[]);
 
   // TanStack Query: users (auto-refetch + shared cache with AdminOverview)
   const {data:usersRes}=useUsers({limit:200});
   const usersList=useMemo(()=>{
     if(usersRes?.data?.length)return usersRes.data.map(mapUserRow);
-    return seedUsers;
+    return [];
   },[usersRes]);
 
   const stageChange=(id,newStatus)=>{
@@ -586,15 +620,16 @@ function AdminUsers(){
   const applyChanges=async()=>{
     const ids=Object.keys(pendingChanges);
     if(!ids.length)return;
+    let failed=0;
     for(const id of ids){
       try{await updateUser.mutateAsync({id,payload:{status:pendingChanges[id]}});}
-      catch{}
+      catch{failed++;}
     }
     // Write the new statuses straight into the users cache so the table text
     // updates instantly without waiting for a background refetch.
     queryClient.setQueryData(queryKeys.users,(old)=>{
       const patch=new Map();
-      Object.entries(pendingChanges).forEach(([id,s])=>patch.set(id,s));
+      Object.entries(pendingChanges).forEach(([id,s])=>patch.set(id,resolveStatusLabel(s)));
       const apply=list=>Array.isArray(list)?list.map(u=>{
         const uid=String(u.id||u._id);
         return patch.has(uid)?{...u,status:patch.get(uid)}:u;
@@ -603,37 +638,49 @@ function AdminUsers(){
       return apply(old);
     });
     queryClient.invalidateQueries({queryKey:queryKeys.users});
-    toast.success(`${ids.length} status change${ids.length>1?'s':''} saved.`);
+    // Reflect staged statuses on the vendor/supplier/affiliate directories.
+    const patch=new Map(Object.entries(pendingChanges).map(([id,s])=>[id,resolveStatusLabel(s)]));
+    const applyTo=list=>Array.isArray(list)?list.map(r=>patch.has(String(r.id))?{...r,status:patch.get(String(r.id))}:r):list;
+    setVendorsList(prev=>applyTo(prev));
+    setSuppliersList(prev=>applyTo(prev));
+    setAffiliatesList(prev=>applyTo(prev));
+    const ok=ids.length-failed;
+    if(ok>0)toast.success(`${ok} status change${ok>1?'s':''} saved.`);
+    if(failed>0)toast.error(`${failed} status change${failed>1?'s':''} could not be saved.`);
     setPendingChanges({});
   };
 
-  const getEffectiveStatus=(r)=>pendingChanges[r.id]||r.status;
+  const getEffectiveStatus=(r)=>pendingChanges[r.id]?resolveStatusLabel(pendingChanges[r.id]):String(r.status||'').toLowerCase().replace(/_/g,' ').replace(/\b\w/g,m=>m.toUpperCase());
 
   const buyerColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Name'},{key:'email',label:'Email'},{key:'phone',label:'Phone'},
+    {key:'status',label:'Status',render:r=><StatusDropdown currentStatus={getEffectiveStatus(r)} onSave={s=>stageChange(r.id,s)}/>},
   ];
   const vendorColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Store'},{key:'category',label:'Category'},
     {key:'products',label:'Products'},{key:'rating',label:'Rating',render:r=>`★ ${r.rating}`},
+    {key:'status',label:'Status',render:r=><StatusDropdown currentStatus={getEffectiveStatus(r)} onSave={s=>stageChange(r.id,s)}/>},
   ];
   const supplierColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Supplier'},{key:'category',label:'Category'},
     {key:'products',label:'Products'},{key:'rating',label:'Rating',render:r=>`★ ${r.rating}`},
+    {key:'status',label:'Status',render:r=><StatusDropdown currentStatus={getEffectiveStatus(r)} onSave={s=>stageChange(r.id,s)}/>},
   ];
   const affiliateColumns=[
     {key:'id',label:'ID'},{key:'name',label:'Affiliate'},{key:'email',label:'Email'},
     {key:'clicks',label:'Clicks'},{key:'conversions',label:'Conversions'},
+    {key:'status',label:'Status',render:r=><StatusDropdown currentStatus={getEffectiveStatus(r)} onSave={s=>stageChange(r.id,s)}/>},
   ];
 
   const deleteSelected=(sel)=>{
     const keys=new Set(sel.map(r=>r.id||r.email));
     if(!keys.size)return;
-    queryClient.invalidateQueries({queryKey:queryKeys.users});
-    toast.success(`${keys.size} account${keys.size>1?'s':''} deleted.`);
+    toast.info('Account deletion is handled per-role via backend user/vendor/supplier endpoints.');
   };
 
   const getTabData=()=>{
-    const filter=list=>statusFilter==='All'?list:list.filter(r=>getEffectiveStatus(r)===statusFilter);
+    const lower=statusFilter.toLowerCase();
+    const filter=list=>statusFilter==='All'?list:list.filter(r=>getEffectiveStatus(r).toLowerCase()===lower);
     switch(tab){
       case 'buyers':return {columns:buyerColumns,rows:filter(usersList.filter(u=>u.role==='Buyer'))};
       case 'vendors':return {columns:vendorColumns,rows:filter(vendorsList)};
@@ -648,16 +695,15 @@ function AdminUsers(){
 
   const statusFilterBar=(
     <div className="status-filter-bar">
-      {['All','Active','Suspended','Blocked','Investigation'].map(s=>{
-        const opt=STATUS_OPTIONS.find(o=>o.value===s);
+      {['All',...STATUS_VALUES.map(s=>s.label)].map(s=>{
+        const opt=STATUS_VALUES.find(o=>o.label===s);
         return(
           <button
             key={s}
             className={'status-filter-btn'+(statusFilter===s?' active':'')}
-            style={opt?{'--sf-color':opt.color}:{}}
+            style={opt?{'--sf-color':opt.hex}:{}}
             onClick={()=>setStatusFilter(s)}
           >
-            {opt&&<span className="status-dot" style={{background:opt.color}}/>}
             {s}
           </button>
         );
@@ -706,12 +752,11 @@ function AdminUsers(){
         rows={rows}
         rowKey={r=>r.id||r.email}
         avatar={r=>({name:r.name,subtitle:r.email||r.category||r.phone})}
-        status={r=>getEffectiveStatus(r)}
-        onStatusChange={(value,row)=>stageChange(row.id,value)}
+        statusOptions={null}
+        onBulkDelete={deleteSelected}
         searchKeys={['id','name','email','phone','category','products']}
         searchPlaceholder="Search users, emails, IDs…"
-        onBulkDelete={deleteSelected}
-        rowClassName={r=>getEffectiveStatus(r)==='Investigation'?'row-investigation':''}
+        rowClassName={r=>getEffectiveStatus(r).toLowerCase()==='investigate'?'row-investigation':''}
       />
 
       <ConfirmDialog
@@ -729,30 +774,73 @@ function AdminUsers(){
 
 // ─── ADMIN REPORTS & CASES ────────────────────────────────────────────────────
 
+const DISPUTE_STATUS={
+  OPEN:'Open',
+  UNDER_REVIEW:'Under Review',
+  EVIDENCE_SUBMITTED:'Under Review',
+  RESOLVED_BUYER_REFUNDED:'Resolved',
+  RESOLVED_VENDOR_RELEASED:'Resolved',
+  RESOLVED_SPLIT:'Resolved',
+  REJECTED:'Rejected',
+};
+
 function AdminReports(){
   const [tab,setTab]=useState('feedback');
   const [dateRange,setDateRange]=useState('30');
   const [searchQuery,setSearchQuery]=useState('');
   const toast=useToast();
-  const [feedback,setFeedback]=useState(seedFeedback);
-  const [disputes,setDisputes]=useState(seedDisputes);
+  const [feedback,setFeedback]=useState([]);
+  const [disputes,setDisputes]=useState([]);
+  const [abuses,setAbuses]=useState([]);
   const [arbitrationModal,setArbitrationModal]=useState(null);
 
-  const moderateFeedback=(fb,newStatus)=>{
-    setFeedback(prev=>prev.map(x=>x.id===fb.id?{...x,status:newStatus}:x));
-    toast.success(`Feedback ${newStatus.toLowerCase()}.`);
+  useEffect(()=>{
+    let active=true;
+    (async()=>{
+      try{
+        const [revRes,dispRes,abuseRes]=await Promise.all([
+          reviewsApi.getAdmin().catch(()=>({data:[]})),
+          disputesApi.adminList().catch(()=>({data:[]})),
+          abuseReportsApi.getMine().catch(()=>({data:[]})),
+        ]);
+        if(!active)return;
+        setFeedback((Array.isArray(revRes?.data)?revRes.data:[]).map(r=>({id:r.id||r._id||`FB-${Date.now()}`,user:r.user||r.reviewer||'',target:r.product||'',type:'Review',rating:r.rating||0,text:r.review||r.comment||'',status:r.status||'PENDING',date:r.date||''})));
+        setDisputes((Array.isArray(dispRes?.data)?dispRes.data:[]).map(d=>({id:d.disputeNumber||String(d._id||'').slice(-6).toUpperCase(),buyer:d.raisedBy?.Fullname||(typeof d.raisedBy==='object'?d.raisedBy.name:'')||'',vendor:d.vendor?.Fullname||(typeof d.vendor==='object'?d.vendor.companyName||d.vendor.name:'')||'',type:typeLabel(d.reason),amount:Number(d.disputedAmount)||0,status:DISPUTE_STATUS[d.status]||String(d.status||'').toLowerCase().replace(/_/g,' '),date:d.createdAt?.slice?.(0,10)||''})));
+        setAbuses(Array.isArray(abuseRes?.data)?abuseRes.data:[]);
+      }catch(e){if(active)toast.error(`Failed to load reports: ${extractErrorMessage(e)}`);}
+    })();
+    return ()=>{active=false};
+  },[]);
+
+  const moderateFeedback=async(fb,newStatus)=>{
+    try{
+      await reviewsApi.update(fb.id,{status:newStatus==='Approved'?'PUBLISHED':'HIDDEN'});
+      setFeedback(prev=>prev.map(x=>x.id===fb.id?{...x,status:newStatus}:x));
+      toast.success(`Feedback ${newStatus.toLowerCase()}.`);
+    }catch(e){toast.error(extractErrorMessage(e));}
   };
 
-  const resolveDispute=(dispute,resolution)=>{
-    setDisputes(prev=>prev.map(x=>x.id===dispute.id?{...x,status:'Resolved',resolution}:x));
-    toast.success(`Dispute ${resolution.toLowerCase()}.`);
+  const resolveDispute=async(dispute,resolution)=>{
+    try{
+      await disputesApi.arbitrate(dispute.id,{decision:resolution});
+      setDisputes(prev=>prev.map(x=>x.id===dispute.id?{...x,status:'Resolved'}:x));
+      toast.success(`Dispute ${resolution.replace(/_/g,' ').toLowerCase()}.`);
+    }catch(e){toast.error(extractErrorMessage(e));}
     setArbitrationModal(null);
+  };
+
+  const updateAbuse=async(r,status)=>{
+    try{
+      await abuseReportsApi.update(r.id,{status});
+      setAbuses(prev=>prev.map(x=>x.id===r.id?{...x,status}:x));
+      toast.success(`Abuse report marked ${String(status).toLowerCase().replace(/_/g,' ')}.`);
+    }catch(e){toast.error(extractErrorMessage(e));}
   };
 
   const feedbackColumns=[
     {key:'id',label:'ID'},{key:'user',label:'User'},{key:'target',label:'Target'},
     {key:'type',label:'Type'},{key:'rating',label:'Rating',render:r=>`★ ${r.rating}`},
-    {key:'text',label:'Review',render:r=><span title={r.text}>{r.text?.slice(0,40)}…</span>},
+    {key:'text',label:'Review',render:r=><span title={r.text}>{String(r.text||'').slice(0,40)}…</span>},
     {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},
   ];
   const disputeColumns=[
@@ -761,14 +849,11 @@ function AdminReports(){
     {key:'status',label:'Status',render:r=><StatusBadge status={r.status}/>},{key:'date',label:'Date'},
   ];
 
-  const filteredFeedback=feedback.filter(f=>{
-    const matchSearch=!searchQuery||JSON.stringify(f).toLowerCase().includes(searchQuery.toLowerCase());
-    return matchSearch;
-  });
-  const filteredDisputes=disputes.filter(d=>{
-    const matchSearch=!searchQuery||JSON.stringify(d).toLowerCase().includes(searchQuery.toLowerCase());
-    return matchSearch;
-  });
+  const filteredFeedback=feedback.filter(f=>!searchQuery||JSON.stringify(f).toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredDisputes=disputes.filter(d=>!searchQuery||JSON.stringify(d).toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredAbuses=abuses.filter(r=>!searchQuery||JSON.stringify(r).toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const openAbuseCount=abuses.filter(a=>String(a.status).toUpperCase()==='PENDING'||String(a.status).toUpperCase()==='INVESTIGATE').length;
 
   return (
     <>
@@ -790,16 +875,16 @@ function AdminReports(){
 
       <div className="metric-grid">
         <Metric label="Total Feedback" value={feedback.length} change="All time" icon="heart"/>
-        <Metric label="Pending Reviews" value={feedback.filter(f=>f.status==='Pending').length} change="Needs moderation" icon="bell"/>
-        <Metric label="Open Disputes" value={disputes.filter(d=>d.status==='Open').length} change="Awaiting resolution" icon="cart"/>
-        <Metric label="Resolved" value={disputes.filter(d=>d.status==='Resolved').length} change="Completed cases" icon="check"/>
+        <Metric label="Pending Reviews" value={feedback.filter(f=>String(f.status).toUpperCase()==='PENDING').length} change="Needs moderation" icon="bell"/>
+        <Metric label="Open Disputes" value={disputes.filter(d=>String(d.status).toUpperCase()==='OPEN'||String(d.status).toUpperCase()==='UNDER REVIEW').length} change="Awaiting resolution" icon="cart"/>
+        <Metric label="Resolved" value={disputes.filter(d=>String(d.status).toUpperCase()==='RESOLVED').length} change="Completed cases" icon="check"/>
       </div>
 
       <TabGroup 
         tabs={[
           {key:'feedback',label:'Customer Feedback',count:feedback.length},
-          {key:'abuse',label:'Abuse Reports',count:2},
-          {key:'disputes',label:'Dispute Arbitration',count:disputes.filter(d=>d.status!=='Resolved').length},
+          {key:'abuse',label:'Abuse Reports',count:abuses.length},
+          {key:'disputes',label:'Dispute Arbitration',count:disputes.filter(d=>String(d.status).toUpperCase()==='OPEN'||String(d.status).toUpperCase()==='UNDER REVIEW').length},
         ]}
         activeTab={tab} 
         onTabChange={setTab}
@@ -810,7 +895,8 @@ function AdminReports(){
           columns={feedbackColumns}
           rows={filteredFeedback}
           rowKey={r=>r.id}
-          actions={r=>r.status==='Pending'?(
+          emptyText="No customer feedback yet."
+          actions={r=>String(r.status).toUpperCase()==='PENDING'?(
             <>
               <button className="table-action-btn" title="Approve" onClick={()=>moderateFeedback(r,'Approved')}><Icon name="check"/></button>
               <button className="table-action-btn danger" title="Reject" onClick={()=>moderateFeedback(r,'Rejected')}><Icon name="trash"/></button>
@@ -821,16 +907,14 @@ function AdminReports(){
 
       {tab==='abuse'&&(
         <div className="data-card">
-          <div className="data-card-head"><div><h3>Abuse Reports</h3><span>2 pending reports</span></div></div>
-          {[
-            {id:'ABUSE-001',reporter:'Jean Paul',target:'Smart Gadgets',reason:'Counterfeit products',status:'Pending'},
-            {id:'ABUSE-002',reporter:'Diane Mukamana',target:'Affiliate Marketer 1',reason:'Spam referrals',status:'Pending'},
-          ].map(r=>(
+          <div className="data-card-head"><div><h3>Abuse Reports</h3><span>{openAbuseCount} pending reports</span></div></div>
+          {filteredAbuses.length===0&&<div className="data-row table-empty">No abuse reports yet.</div>}
+          {filteredAbuses.map(r=>(
             <div className="activity-row" key={r.id}>
-              <div><b>{r.reporter} → {r.target}</b><small>{r.reason}</small></div>
+              <div><b>{(r.reporter||'Reporter')} → {r.targetUser||r.store?.name||'Target'}</b><small>{r.reasonCategory} · {r.status}</small></div>
               <div className="row-actions">
-                <button className="table-action-btn" title="Investigate" onClick={()=>toast.info('Investigation started.')}><Icon name="eye"/></button>
-                <button className="table-action-btn" title="Dismiss" onClick={()=>toast.success('Report dismissed.')}><Icon name="trash"/></button>
+                {String(r.status).toUpperCase()==='PENDING'&&<button className="table-action-btn" title="Investigate" onClick={()=>updateAbuse(r,'INVESTIGATE')}><Icon name="eye"/></button>}
+                {String(r.status).toUpperCase()!=='REJECTED'&&<button className="table-action-btn" title="Dismiss" onClick={()=>updateAbuse(r,'REJECTED')}><Icon name="trash"/></button>}
               </div>
             </div>
           ))}
@@ -842,7 +926,8 @@ function AdminReports(){
           columns={disputeColumns}
           rows={filteredDisputes}
           rowKey={r=>r.id}
-          actions={r=>r.status!=='Resolved'?(
+          emptyText="No disputes yet."
+          actions={r=>String(r.status).toUpperCase()!=='RESOLVED'&&String(r.status).toUpperCase()!=='REJECTED'?(
             <button className="table-action-btn" title="Arbitrate" onClick={()=>setArbitrationModal(r)}><Icon name="cart"/></button>
           ):null}
         />

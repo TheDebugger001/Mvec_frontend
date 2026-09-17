@@ -1,19 +1,14 @@
-import {useState,useEffect,useCallback,useMemo} from 'react';
-import {Link,useLocation,useNavigate} from 'react-router-dom';
+import {useState,useEffect,useMemo} from 'react';
+import {useLocation} from 'react-router-dom';
 import {useQueryClient} from '@tanstack/react-query';
 import DashboardLayout from '../components/DashboardLayout';
 import Icon from '../components/Icon';
 import TabGroup,{Modal,ConfirmDialog} from '../components/TabGroup';
-import SmartTable from '../components/SmartTable';
-import Pagination from '../components/Pagination';
-import {products as seedProducts,demoOrders} from '../data';
-import {getOrders} from '../services/mvecStore';
+import {getPeriodChart,getPeriodLabels,getPeriodMetrics,normalizePeriod} from '../services/analytics';
 import {useAuth} from '../context/AuthContext';
-import {getPeriodChart,getPeriodLabels,getPeriodMetrics} from '../services/analytics';
 import {useToast} from '../components/Toast';
-import {extractErrorMessage} from '../API/client';
-import {clearCatalogCache} from '../services/catalogApi';
-import {useCreateProduct,useUpdateProduct} from '../hooks/useProducts';
+import {extractErrorMessage,payoutsApi,categoriesApi} from '../API';
+import {useCreateProduct,useUpdateProduct,useDeleteProduct,useVendorProducts} from '../hooks/useProducts';
 import {useSuppliers} from '../hooks/useSuppliers';
 import {useVendorOrders} from '../hooks/useOrders';
 import {useVendorReviews,useReviewReply} from '../hooks/useReviews';
@@ -23,15 +18,13 @@ import SupplierOrderModal from '../components/SupplierOrderModal';
 
 const hasToken=()=>!!localStorage.getItem('huska_token');
 const money=n=>new Intl.NumberFormat('en-RW').format(Number(n)||0)+' RWF';
-const PRODUCT_KEY='mvec_vendor_products';
 const generateSku=(name='',category='')=>{
   const base=(String(name).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,8)||'PROD').toUpperCase();
   const cat=(String(category).toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,3)||'GEN').toUpperCase();
   return `${cat}-${base}-${Date.now().toString(36).toUpperCase()}`;
 };
 
-const readJSON=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key))??fallback}catch{return fallback}};
-const toBackendPayload=p=>({name:p.name,sku:p.sku,brand:p.brand||'',description:p.description||'',price:Number(p.price)||0,stockQuantity:Math.max(0,Number(p.stock)||0),status:(Number(p.stock)||0)<=0?'OUT_OF_STOCK':'ACTIVE',color:p.color||'',size:p.size||'',attributes:{Color:p.color||'',Size:p.size||'',Material:p.material||'',Brand:p.brand||''},media:{mainImage:p.images?.[0]||p.image||'',gallery:Array.isArray(p.images)?p.images:[],videos:Array.isArray(p.videos)?p.videos:[]}});
+const toBackendPayload=p=>({name:p.name,sku:p.sku,brand:p.brand||'',description:p.description||'',category:p.category||undefined,price:Number(p.price)||0,stockQuantity:Math.max(0,Number(p.stock)||0),status:(Number(p.stock)||0)<=0?'OUT_OF_STOCK':'ACTIVE',color:p.color||'',size:p.size||'',attributes:{Color:p.color||'',Size:p.size||'',Material:p.material||'',Brand:p.brand||''},media:{mainImage:p.images?.[0]||p.image||'',gallery:Array.isArray(p.images)?p.images:[],videos:Array.isArray(p.videos)?p.videos:[]}});
 
 const fileToDataURLs=(files,onDone)=>{
   const arr=Array.from(files||[]);
@@ -40,35 +33,26 @@ const fileToDataURLs=(files,onDone)=>{
   arr.forEach(f=>{const r=new FileReader();r.onload=()=>{out.push(r.result);if(++done===arr.length)onDone(out);};r.readAsDataURL(f);});
 };
 
-// ─── SEED DATA ────────────────────────────────────────────────────────────────
-const initialProducts=seedProducts.map(p=>({...p,shortDescription:p.description?.slice(0,90)||'',status:p.stock?'Active':'Out of stock',images:[p.image],vendor:'Kigali Tech Store'}));
-const seedWallet={pending:2850000,available:1420000,history:[
-  {id:'TXN-001',type:'Escrow Release',reference:'MVEC-10452',amount:765000,status:'Released',date:'2026-08-27'},
-  {id:'TXN-002',type:'Platform Fee',reference:'MVEC-10452',amount:-85000,status:'Deducted',date:'2026-08-27'},
-  {id:'TXN-003',type:'Escrow Release',reference:'MVEC-10451',amount:171000,status:'Released',date:'2026-08-28'},
-  {id:'TXN-004',type:'Withdrawal',reference:'WTH-001',amount:-200000,status:'Completed',date:'2026-08-28'},
-]};
-const seedSuppliers=[
-  {id:'SUP-001',name:'Rwanda Wholesale Electronics',category:'Electronics',rating:4.7,ratingAvg:4.7,moq:10,catalog:126,location:'Kigali, Rwanda',verificationStatus:'VERIFIED',logo:''},
-  {id:'SUP-002',name:'Bulk Fashion Hub',category:'Fashion',rating:4.5,ratingAvg:4.5,moq:5,catalog:84,location:'Kigali, Rwanda',verificationStatus:'VERIFIED',logo:''},
-  {id:'SUP-003',name:'HomeGoods Supply Co',category:'Home & Living',rating:4.6,ratingAvg:4.6,moq:8,catalog:63,location:'Kigali, Rwanda',verificationStatus:'VERIFIED',logo:''},
-];
-const seedOrders=[
-  {id:'MVEC-10452',customer:'Aline Uwase',product:'Samsung Galaxy S25',total:850000,payment:'SUCCESS',status:'Delivered'},
-  {id:'MVEC-10451',customer:'Jean Paul',product:'Classic Leather Sneakers',total:95000,payment:'SUCCESS',status:'In Transit'},
-  {id:'MVEC-10450',customer:'Diane Mukamana',product:'Smart Watch Active',total:99000,payment:'PENDING',status:'Preparing'},
-  {id:'MVEC-10449',customer:'Patrick Niyonzima',product:'Office Chair Pro',total:185000,payment:'SUCCESS',status:'Confirmed'},
-];
-const seedReviews=[
-  {id:'REV-001',product:'Wireless Headphones',customer:'Aline Uwase',rating:5,text:'Great sound and battery',date:'2026-08-26'},
-  {id:'REV-002',product:'Smart Watch Active',customer:'Jean Paul',rating:4,text:'Good value for money',date:'2026-08-25'},
-];
-const seedAbuse=[
-  {id:'ABUSE-001',reporter:'Customer A',reason:'Wrong item received',status:'Open',date:'2026-08-24'},
-];
-const seedWarnings=[
-  {id:'WARN-001',message:'Product listing policy update - Please review description requirements',date:'2026-08-20',acknowledged:false},
-];
+const localProductStatus=s=>{
+  const upper=String(s||'').toUpperCase();
+  if(upper==='OUT_OF_STOCK')return 'Out of stock';
+  if(upper==='DRAFT')return 'Draft';
+  if(upper==='PENDING_APPROVAL')return 'Pending';
+  return 'Active';
+};
+
+const flattenCategories=(tree=[])=>{
+  const out=[];
+  const walk=nodes=>{
+    nodes.forEach(n=>{
+      out.push({id:n._id||n.id,name:n.name||''});
+      if(Array.isArray(n.children)&&n.children.length)walk(n.children);
+      if(Array.isArray(n.subcategories)&&n.subcategories.length)walk(n.subcategories);
+    });
+  };
+  walk(tree);
+  return out;
+};
 
 // ─── REUSABLE ─────────────────────────────────────────────────────────────────
 
@@ -163,17 +147,42 @@ const PRODUCT_STATUS_COLORS={
 function VendorOverview(){
   const [tab,setTab]=useState('orders');
   const [period,setPeriod]=useState('30 Days');
-  const chart=getPeriodChart(period);
-  const labels=getPeriodLabels(period);
-  const metrics=getPeriodMetrics(period);
-  const products=readJSON(PRODUCT_KEY,initialProducts);
+  const normalized=normalizePeriod(period);
+
+  const [chart,setChart]=useState([]);
+  const [labels,setLabels]=useState([]);
+  const [metrics,setMetrics]=useState({sales:0,orders:0,avgOrder:0,customers:0,activeVendors:0,lowStockProducts:0,paymentVolume:0});
+
+  useEffect(()=>{
+    let active=true;
+    (async()=>{
+      try{
+        const [m,c,l]=await Promise.all([getPeriodMetrics(normalized),getPeriodChart(normalized),getPeriodLabels(normalized)]);
+        if(!active)return;
+        setMetrics(m||{});
+        setChart(c||[]);
+        setLabels(l||[]);
+      }catch(e){console.warn(e);}
+    })();
+    return ()=>{active=false};
+  },[normalized]);
+
+  const {data:productsRes}=useVendorProducts();
+  const products=useMemo(()=>(Array.isArray(productsRes?.products)?productsRes.products:[]).map(p=>({id:p._id||p.id,name:p.name||'',stock:Number(p.stockQuantity??p.stock??0),status:p.status||'ACTIVE',image:p.media?.mainImage||p.image||''})),[productsRes]);
+
+  const {data:reviewsRes}=useVendorReviews();
+  const reviews=useMemo(()=>(Array.isArray(reviewsRes?.data)?reviewsRes.data:[]),[reviewsRes]);
+  const storeRating=useMemo(()=>{
+    if(!reviews.length)return '—';
+    return (reviews.reduce((s,r)=>s+(Number(r.rating)||0),0)/reviews.length).toFixed(1)+' ★';
+  },[reviews]);
 
   // TanStack Query: live vendor orders with background polling
   const {data:ordersRes}=useVendorOrders();
   const orders=useMemo(()=>{
-    const raw=ordersRes?.data||(Array.isArray(ordersRes)?ordersRes:null);
-    if(raw?.length)return raw.map(o=>({id:o.orderNumber||o._id||`MVEC-${Date.now()}`,customer:o.user?.name||o.customer||'',product:(Array.isArray(o.items)&&o.items[0]?.productName)||o.product||'',total:Number(o.totalAmount||o.total)||0,payment:o.paymentStatus||'SUCCESS',status:o.status||'Processing'}));
-    return seedOrders;
+    const raw=Array.isArray(ordersRes?.orders)?ordersRes.orders:(Array.isArray(ordersRes)?ordersRes:null);
+    if(!raw?.length)return [];
+    return raw.map(o=>({id:o.orderNumber||o._id||`MVEC-${Date.now()}`,customer:o.user?.Fullname||o.user?.name||o.customer||'',product:(Array.isArray(o.items)&&o.items[0]?.productName)||o.items?.[0]?.name||o.product||'',total:Number(o.totalAmount||o.vendorSubtotal||o.total)||0,payment:o.paymentStatus||'SUCCESS',status:o.orderStatus||o.status||'Processing'}));
   },[ordersRes]);
   
   const orderColumns=[
@@ -188,7 +197,7 @@ function VendorOverview(){
   ];
   const stockColumns=[
     {key:'name',label:'Product'},{key:'stock',label:'Stock',render:r=><span className={r.stock<=5?'warning-text':''}>{r.stock} units</span>},
-    {key:'status',label:'Status',render:r=><StatusBadge status={r.stock<=5?'Low Stock':r.stock?'In Stock':'Out of Stock'}/>},
+    {key:'status',label:'Status',render:r=><StatusBadge status={r.stock<=5?'Out of stock':r.stock?'Active':'Out of stock'}/>},
   ];
 
   const getTabData=()=>{
@@ -214,15 +223,15 @@ function VendorOverview(){
       </div>
 
       <div className="metric-grid">
-        <Metric label="Daily Sales" value={money(metrics.sales)} icon="chart" sub={`${period} performance`}/>
-        <Metric label="Active Orders" value={metrics.orders} icon="cart" sub={`${period} orders`}/>
-        <Metric label="Low Stock" value={products.filter(p=>Number(p.stock)<=5).length} icon="bell" sub="Needs attention"/>
-        <Metric label="Store Rating" value="4.8 ★" icon="heart" sub="Customer reviews"/>
+        <Metric label="Daily Sales" value={money(metrics.sales)} icon="chart" sub={`${normalized} performance`}/>
+        <Metric label="Active Orders" value={metrics.orders} icon="cart" sub={`${normalized} orders`}/>
+        <Metric label="Low Stock" value={metrics.lowStockProducts||products.filter(p=>Number(p.stock)<=5).length} icon="bell" sub="Needs attention"/>
+        <Metric label="Store Rating" value={storeRating} icon="heart" sub="Customer reviews"/>
       </div>
 
       <div className="dash-grid">
         <div className="data-card chart-card">
-          <div className="data-card-head"><div><h3>Sales Trend</h3><span>{period}</span></div></div>
+          <div className="data-card-head"><div><h3>Sales Trend</h3><span>{normalized}</span></div></div>
           <div className="fake-chart">
             {chart.map((h,i)=><div key={i} style={{height:h+'%'}}><span>{labels[i]}</span></div>)}
           </div>
@@ -232,12 +241,13 @@ function VendorOverview(){
           {products.filter(p=>Number(p.stock)<=9).slice(0,4).map(p=>(
             <div className="activity-row" key={p.id}><div><b>{p.name}</b><small>{p.stock} units remaining</small></div><em className="status warning">Low</em></div>
           ))}
+          {products.filter(p=>Number(p.stock)<=9).length===0&&<p className="muted">No low stock alerts.</p>}
         </div>
       </div>
 
       <TabGroup tabs={[{key:'orders',label:'Active Orders',count:orders.length},{key:'delivery',label:'Delivery Status'},{key:'stock',label:'Low Stock Alerts',count:products.filter(p=>p.stock<=5).length}]} activeTab={tab} onTabChange={setTab}/>
       
-      <DataTable columns={columns} rows={rows} rowKey={r=>r.id||r.name}/>
+      <DataTable columns={columns} rows={rows} rowKey={r=>r.id||r.name} emptyText="No vendor orders yet."/>
     </>
   );
 }
@@ -246,19 +256,43 @@ function VendorOverview(){
 
 function VendorWallet(){
   const toast=useToast();
-  const [wallet]=useState(seedWallet);
+  const [balance,setBalance]=useState({availableBalance:0,pendingBalance:0,available:0,pending:0});
+  const [txns,setTxns]=useState([]);
   const [withdrawModal,setWithdrawModal]=useState(false);
-  const [amount,setAmount]=useState(wallet.available);
+  const [amount,setAmount]=useState('');
   const [method,setMethod]=useState('MTN MoMo');
-  const [account,setAccount]=useState('+250 788 100 002');
-  const [txns,setTxns]=useState(wallet.history);
+  const [account,setAccount]=useState('');
 
-  const submitWithdrawal=()=>{
-    if(amount<10000){toast.error('Minimum withdrawal is RWF 10,000.');return;}
-    if(amount>wallet.available){toast.error('Insufficient balance.');return;}
-    setTxns(prev=>[{id:`WTH-${Date.now()}`,type:'Withdrawal',reference:`WTH-${Date.now()}`,amount:-amount,status:'Processing',date:new Date().toISOString().slice(0,10)},...prev]);
-    toast.success(`Withdrawal of ${money(amount)} requested.`);
-    setWithdrawModal(false);
+  const available=Number(balance.availableBalance??balance.available??0);
+  const pending=Number(balance.pendingBalance??balance.pending??0);
+
+  useEffect(()=>{
+    let active=true;
+    (async()=>{
+      try{
+        const [b,h]=await Promise.all([payoutsApi.getBalance(),payoutsApi.getHistory()]);
+        if(!active)return;
+        setBalance(b?.balance||{});
+        setTxns((Array.isArray(h?.payouts)?h.payouts:[]).map(p=>({id:p.payoutNumber||p._id||`TXN-${Date.now()}`,type:'Withdrawal',reference:p.payoutNumber||'—',amount:-(Number(p.amount)||0),status:p.status||'PAID',date:p.createdAt?.slice?.(0,10)||''})));
+      }catch(e){if(active)toast.error(extractErrorMessage(e));}
+    })();
+    return ()=>{active=false};
+  },[]);
+
+  const submitWithdrawal=async()=>{
+    const value=Math.round(Number(amount)||0);
+    if(value<10000){toast.error('Minimum withdrawal is RWF 10,000.');return;}
+    if(value>available){toast.error('Insufficient balance.');return;}
+    if(!account.trim()){toast.error('Please provide a payout phone / account.');return;}
+    try{
+      await payoutsApi.requestPayout({amount:value,payoutMethod:method.toUpperCase(),payoutDetails:{accountName:account.trim(),accountNumber:account.trim()}});
+      const [b,h]=await Promise.all([payoutsApi.getBalance(),payoutsApi.getHistory()]);
+      setBalance(b?.balance||{});
+      setTxns((Array.isArray(h?.payouts)?h.payouts:[]).map(p=>({id:p.payoutNumber||p._id||`TXN-${Date.now()}`,type:'Withdrawal',reference:p.payoutNumber||'—',amount:-(Number(p.amount)||0),status:p.status||'PAID',date:p.createdAt?.slice?.(0,10)||''})));
+      toast.success(`Withdrawal of ${money(value)} requested.`);
+      setWithdrawModal(false);
+      setAmount('');
+    }catch(e){toast.error(extractErrorMessage(e));}
   };
 
   const txnColumns=[
@@ -278,20 +312,20 @@ function VendorWallet(){
       </div>
 
       <div className="metric-grid">
-        <Metric label="Pending Balance" value={money(wallet.pending)} icon="wallet" sub="Held in escrow"/>
-        <Metric label="Available Balance" value={money(wallet.available)} icon="wallet" sub="Cleared for withdrawal"/>
+        <Metric label="Pending Balance" value={money(pending)} icon="wallet" sub="Held in escrow"/>
+        <Metric label="Available Balance" value={money(available)} icon="wallet" sub="Cleared for withdrawal"/>
       </div>
 
       <DataTable columns={txnColumns} rows={txns} rowKey={r=>r.id} emptyText="No transactions yet."/>
 
       <Modal open={withdrawModal} onClose={()=>setWithdrawModal(false)} title="WITHDRAWAL" subtitle="Request a payout">
-        <p>Available balance: <b>{money(wallet.available)}</b>. Minimum withdrawal is RWF 10,000.</p>
+        <p>Available balance: <b>{money(available)}</b>. Minimum withdrawal is RWF 10,000.</p>
         <label className="field"><span>Amount (RWF)</span><input type="number" min="10000" step="1000" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></label>
         <label className="field"><span>Payment method</span><select value={method} onChange={e=>setMethod(e.target.value)}><option>MTN MoMo</option><option>Airtel Money</option><option>Bank account</option></select></label>
-        <label className="field"><span>Account / phone</span><input value={account} onChange={e=>setAccount(e.target.value)}/></label>
+        <label className="field"><span>Account / phone</span><input value={account} onChange={e=>setAccount(e.target.value)} placeholder="+250 7XX XXX XXX"/></label>
         <div className="modal-actions">
           <button className="outline-btn" onClick={()=>setWithdrawModal(false)}>Cancel</button>
-          <button className="gradient-btn" onClick={submitWithdrawal} disabled={wallet.available<10000}>Submit Request</button>
+          <button className="gradient-btn" onClick={submitWithdrawal} disabled={available<10000}>Submit Request</button>
         </div>
       </Modal>
     </>
@@ -308,15 +342,15 @@ function VendorSuppliers(){
   const suppliers=useMemo(()=>{
     const raw=suppliersRes?.data;
     if(Array.isArray(raw)&&raw.length)return raw;
-    if(suppliersRes?.suppliers?.length)return suppliersRes.suppliers;
-    return seedSuppliers;
+    if(Array.isArray(suppliersRes?.suppliers)&&suppliersRes.suppliers.length)return suppliersRes.suppliers;
+    return [];
   },[suppliersRes]);
 
   const columns=[
     {key:'name',label:'Supplier',render:r=>(
       <div className="admin-product-main">
         {r.logoUrl||r.logo?<img src={r.logoUrl||r.logo} alt=""/>:<div className="product-placeholder"><Icon name="box"/></div>}
-        <div><b>{r.businessName||r.name}</b><small>{(r.category||'')+' · '+(r.location?.name||r.location||'Rwanda')}</small></div>
+        <div><b>{r.businessName||r.name}</b><small>{(r.category?.name||r.category||'')+' · '+(r.location?.name||r.location||'Rwanda')}</small></div>
       </div>
     )},
     {key:'rating',label:'Rating',render:r=>`★ ${Number(r.ratingAvg||r.rating)||'—'}`},
@@ -338,6 +372,7 @@ function VendorSuppliers(){
         columns={columns}
         rows={suppliers}
         rowKey={r=>r.id||r._id}
+        emptyText="No suppliers found."
         actions={r=><button className="gradient-btn place-order-btn" onClick={()=>setDetailsSupplier(r)}>Details</button>}
       />
 
@@ -354,49 +389,83 @@ function VendorProducts(){
   const queryClient=useQueryClient();
   const createProduct=useCreateProduct();
   const updateProduct=useUpdateProduct();
-  const owner=user?.companyName||user?.fullName||'Kigali Tech Store';
-  const normalize=p=>({...p,images:Array.isArray(p.images)?p.images:(p.image?[p.image]:[]),videos:Array.isArray(p.videos)?p.videos:(Array.isArray(p.media?.videos)?p.media.videos:[]),color:p.color||'',size:p.size||'',brand:p.brand||'',status:p.status||'Active'});
-  const [rows,setRows]=useState(()=>readJSON(PRODUCT_KEY,initialProducts).map(normalize).filter(p=>!p.vendor||p.vendor===owner));
+  const deleteProductMutation=useDeleteProduct();
+  const owner=user?.companyName||user?.fullName||'My Store';
+
+  const normalize=p=>{
+    const images=Array.isArray(p.media?.gallery)&&p.media.gallery.length?p.media.gallery:(p.media?.mainImage?[p.media.mainImage]:(p.image?[p.image]:[]));
+    return {
+      ...p,
+      backendId:p._id||p.id,
+      id:p._id||p.id||`PRD-${Date.now()}`,
+      images,
+      videos:Array.isArray(p.media?.videos)?p.media.videos:[],
+      category:typeof p.category==='object'&&p.category?p.category._id||p.category.id:null,
+      categoryName:typeof p.category==='object'&&p.category?p.category.name:'',
+      price:Number(p.price)||0,
+      stock:Number(p.stockQuantity??p.stock??0),
+      color:p.attributes?.Color||p.color||'',
+      size:p.attributes?.Size||p.size||'',
+      brand:p.brand||'',
+      description:p.description||'',
+      status:localProductStatus(p.status),
+    };
+  };
+
+  const {data:productsRes,invalidate:pInvalidate}=useVendorProducts();
+  const [rows,setRows]=useState([]);
+  useEffect(()=>{
+    setRows((Array.isArray(productsRes?.products)?productsRes.products:[]).map(normalize));
+  },[productsRes]);
+
   const [statusFilter,setStatusFilter]=useState('All');
   const [editModal,setEditModal]=useState(null);
   const [deleteConfirm,setDeleteConfirm]=useState(null);
   const [form,setForm]=useState({name:'',sku:'',category:'',price:'',stock:'',description:'',status:'Draft',color:'',size:'',brand:'',images:[],videos:[]});
-  const [categories]=useState(['Electronics','Phones','Computers','Fashion','Home & Living','Beauty','Sports','Automotive']);
 
-  const persist=next=>{setRows(next);localStorage.setItem(PRODUCT_KEY,JSON.stringify(next))};
+  const [categories,setCategories]=useState([]);
+  useEffect(()=>{
+    let active=true;
+    categoriesApi.getAll().then(r=>{
+      const tree=Array.isArray(r?.categories)?r.categories:(Array.isArray(r?.data)?r.data:[]);
+      if(active)setCategories(flattenCategories(tree));
+    }).catch(()=>{});
+    return ()=>{active=false};
+  },[]);
+
+  const reload=()=>{queryClient.invalidateQueries({queryKey:queryKeys.products});};
 
   const saveProduct=async()=>{
     if(!form.name||!form.category||form.price===''){toast.error('Please complete required fields.');return;}
     const sku=(form.sku||'').trim()||generateSku(form.name,form.category);
-    const product={...form,id:form.id||Date.now(),sku,price:Number(form.price),stock:Number(form.stock),image:form.images?.[0]||'',gallery:Array.isArray(form.images)?form.images:[],vendor:owner};
-    
-    if(hasToken()){
-      try{
-        const payload=toBackendPayload(product);
-        if(editModal?.isNew){await createProduct.mutateAsync(payload);}
-        else if(form.backendId){await updateProduct.mutateAsync({id:form.backendId,payload});}
-        queryClient.invalidateQueries({queryKey:queryKeys.products});
-        clearCatalogCache();
-      }catch(e){toast.error(extractErrorMessage(e));}
-    }
-    
-    const isNew=editModal?.isNew;
-    persist(isNew?[product,...rows]:rows.map(x=>x.id===form.id?{...x,...product}:x));
-    setStatusFilter('All');
-    toast.success(isNew?'Product created.':'Product saved.');
-    setEditModal(null);
+    const product={...form,sku,price:Number(form.price),stock:Number(form.stock),image:form.images?.[0]||'',gallery:Array.isArray(form.images)?form.images:[],vendor:owner};
+    try{
+      const payload=toBackendPayload(product);
+      if(editModal?.isNew){await createProduct.mutateAsync(payload);}
+      else if(form.backendId){await updateProduct.mutateAsync({id:form.backendId,payload});}
+      reload();
+      toast.success(editModal?.isNew?'Product created.':'Product saved.');
+      setEditModal(null);
+    }catch(e){toast.error(extractErrorMessage(e));}
   };
 
-  const deleteProduct=(p)=>{
-    persist(rows.filter(x=>x.id!==p.id));
-    toast.success(`${p.name} deleted.`);
+  const deleteProduct=async(p)=>{
+    try{
+      await deleteProductMutation.mutateAsync(p.backendId||p.id);
+      reload();
+      toast.success(`${p.name} deleted.`);
+    }catch(e){toast.error(extractErrorMessage(e));}
     setDeleteConfirm(null);
   };
 
-  const toggleArchive=(p)=>{
-    persist(rows.map(x=>x.id===p.id?{...x,status:x.status==='Archived'?'Active':'Archived'}:x));
+  const toggleArchive=async(p)=>{
+    const nextStatus=p.status==='Draft'?'ACTIVE':'DRAFT';
+    try{
+      await updateProduct.mutateAsync({id:p.backendId||p.id,payload:{status:nextStatus}});
+      reload();
+      toast.info(nextStatus==='DRAFT'?'Product archived.':'Product restored.');
+    }catch(e){toast.error(extractErrorMessage(e));}
     setStatusFilter('All');
-    toast.info(p.status==='Archived'?'Product restored.':'Product archived.');
   };
 
   const openCreate=()=>{setForm({name:'',sku:'',category:'',price:'',stock:'',description:'',status:'Draft',color:'',size:'',brand:'',images:[],videos:[]});setEditModal({isNew:true});};
@@ -406,7 +475,7 @@ function VendorProducts(){
     {key:'name',label:'Product',render:r=>(
       <div className="admin-product-main">
         {r.images?.[0]?<img src={r.images[0]} alt=""/>:<div className="product-placeholder"><Icon name="box"/></div>}
-        <div><b>{r.name}</b><small>{r.sku} · {r.category}</small></div>
+        <div><b>{r.name}</b><small>{r.sku} · {r.categoryName||''}</small></div>
       </div>
     )},
     {key:'price',label:'Price',render:r=>money(r.price)},
@@ -450,10 +519,11 @@ function VendorProducts(){
         columns={columns}
         rows={filteredRows}
         rowKey={r=>r.id}
+        emptyText="No products yet. Create your first listing."
         actions={r=>(
           <>
             <button title="Edit" onClick={()=>openEdit(r)}><Icon name="edit"/></button>
-            <button title={r.status==='Archived'?'Restore':'Archive'} onClick={()=>toggleArchive(r)}><Icon name={r.status==='Archived'?'check':'box'}/></button>
+            <button title={r.status==='Draft'?'Restore':'Archive'} onClick={()=>toggleArchive(r)}><Icon name={r.status==='Draft'?'check':'box'}/></button>
             <button title="Delete" onClick={()=>setDeleteConfirm(r)}><Icon name="trash"/></button>
           </>
         )}
@@ -466,7 +536,7 @@ function VendorProducts(){
             <label className="field"><span>SKU (auto-generated if left blank)</span><input value={form.sku} onChange={e=>setForm({...form,sku:e.target.value})} placeholder="SAM-S25-256-BLK"/></label>
           </div>
           <div className="two-col">
-            <label className="field"><span>Category *</span><select value={form.category} onChange={e=>setForm({...form,category:e.target.value})} required><option value="">Select category</option>{categories.map(c=><option key={c}>{c}</option>)}</select></label>
+            <label className="field"><span>Category *</span><select value={form.category||''} onChange={e=>setForm({...form,category:e.target.value})} required><option value="">Select category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
             <label className="field"><span>Brand</span><input value={form.brand||''} onChange={e=>setForm({...form,brand:e.target.value})} placeholder="Brand name"/></label>
           </div>
           <label className="field"><span>Description *</span><textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} rows="4" required placeholder="Describe the product…"/></label>
@@ -814,18 +884,10 @@ function VendorReports(){
   const queryClient=useQueryClient();
 
   const {data:reviewsRes}=useVendorReviews();
-  const reviews=useMemo(()=>{
-    const raw=reviewsRes?.data;
-    if(Array.isArray(raw)) return raw;
-    return seedReviews.map(r=>({...r,customer:r.customer,product:r.product,comment:r.text,date:r.date,isVerifiedPurchase:true}));
-  },[reviewsRes]);
+  const reviews=useMemo(()=>(Array.isArray(reviewsRes?.data)?reviewsRes.data:[]),[reviewsRes]);
 
   const {data:abuseRes}=useAbuseReports();
-  const abuses=useMemo(()=>{
-    const raw=abuseRes?.data;
-    if(Array.isArray(raw)) return raw;
-    return seedAbuse.map(r=>({...r,targetUser:r.reporter,reasonCategory:r.reason,incidentDate:r.date,status:r.status}));
-  },[abuseRes]);
+  const abuses=useMemo(()=>(Array.isArray(abuseRes?.data)?abuseRes.data:[]),[abuseRes]);
 
   const avgRating=useMemo(()=>{
     if(!reviews.length) return "0.0";
@@ -893,7 +955,7 @@ function VendorReports(){
         </div>
       )}
 
-      <TabGroup tabs={[{key:'reviews',label:'Customer Reviews',count:reviews.length},{key:'abuse',label:'Abuse Reports',count:abuses.length},{key:'warnings',label:'Policy Warnings',count:seedWarnings.length}]} activeTab={tab} onTabChange={setTab}/>
+      <TabGroup tabs={[{key:'reviews',label:'Customer Reviews',count:reviews.length},{key:'abuse',label:'Abuse Reports',count:abuses.length},{key:'warnings',label:'Policy Warnings'}]} activeTab={tab} onTabChange={setTab}/>
 
       {tab==='reviews'&&(
         <DataTable
@@ -925,9 +987,7 @@ function VendorReports(){
 
       {tab==='warnings'&&(
         <div className="data-card">
-          {seedWarnings.map(r=>(
-            <div className="activity-row" key={r.id}><div><b>{r.message}</b><small>{r.date}</small></div><StatusBadge status={r.acknowledged?'Acknowledged':'Pending'}/></div>
-          ))}
+          <div className="data-row table-empty">No policy warnings available through the API yet.</div>
         </div>
       )}
 

@@ -1,10 +1,8 @@
 import {useEffect,useMemo,useState} from "react";
 import {Link,useNavigate,useSearchParams} from "react-router-dom";
 import Storefront from "../components/Storefront";
-import {products as seedProducts} from "../data";
 import {useMarketplace} from "../context/MarketplaceContext";
 import {useAuth} from "../context/AuthContext";
-import {getCatalogProducts, snapshotOrderPricing} from "../services/mvecStore";
 import {ordersApi} from "../API/orders";
 import {productsApi} from "../API/products";
 import {extractErrorMessage} from "../API/client";
@@ -20,10 +18,7 @@ export default function Checkout(){
   const pid=params.get("product");
   const [directProduct,setDirectProduct]=useState(() => {
     if (!pid) return null;
-    const fromCart = cart.find(x=>String(x.productId||x.id)===pid);
-    if (fromCart) return fromCart;
-    const catalog = getCatalogProducts(seedProducts);
-    return catalog.find(x=>String(x.id)===pid) || null;
+    return cart.find(x=>String(x.productId||x.id)===pid) || null;
   });
 
   useEffect(()=>{
@@ -53,8 +48,7 @@ export default function Checkout(){
   const [submitting,setSubmitting]=useState(false);
   const subtotal=items.reduce((s,x)=>s+x.price*(x.qty||1),0);
   const shipping=form.province==="Kigali City"?0:(form.method==="express"?10000:5000);
-  const pricing=snapshotOrderPricing(items,shipping,0,false);
-  const total=pricing.buyerTotal;
+  const total=subtotal+shipping;
   function update(e){setForm({...form,[e.target.name]:e.target.value});}
   async function continuePayment(e){
     e.preventDefault(); setError("");

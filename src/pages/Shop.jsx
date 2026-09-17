@@ -1,7 +1,6 @@
 import {useMemo,useState,useEffect} from 'react';
 import {useSearchParams} from 'react-router-dom';
 import Storefront from '../components/Storefront';
-import {products as seedProducts,categories as seedCategories} from '../data';
 import {getCatalogProducts} from '../services/mvecStore';
 import {loadCatalog} from '../services/catalogApi';
 import {rankCatalogProducts,aggregateCategories} from '../services/searchService';
@@ -18,8 +17,8 @@ export default function Shop(){
   const [cat,setCat]=useState(searchParams.get('category')||'');
   const [sort,setSort]=useState('featured');
   const [max,setMax]=useState(2500000);
-  const [base,setBase]=useState(seedProducts);
-  const [categories,setCategories]=useState(seedCategories);
+  const [base,setBase]=useState([]);
+  const [categories,setCategories]=useState([]);
 
   // Keep filters in sync with the URL (?q= and ?category=) so navigation works
   useEffect(()=>{
@@ -32,10 +31,10 @@ export default function Shop(){
     let mounted=true;
     loadCatalog().then(cat=>{
       if(!mounted)return;
-      const prods=cat.products&&cat.products.length?cat.products:seedProducts;
+      const prods=cat.products||[];
       setBase(prods);
-      const cats=cat.categories&&cat.categories.length?cat.categories.map(c=>(typeof c==='string'?c:c.name)).filter(Boolean):seedCategories;
-      setCategories(aggregateCategories([seedCategories,cats.length?cats:seedCategories]));
+      const cats=cat.categories&&cat.categories.length?cat.categories.map(c=>(typeof c==='string'?c:c.name)).filter(Boolean):[];
+      setCategories(aggregateCategories([cats]));
     });
     return()=>{mounted=false};
   },[]);

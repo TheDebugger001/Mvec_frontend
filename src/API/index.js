@@ -26,4 +26,6 @@ export { shippingApi } from "./shipping";
 export { notificationsApi } from "./notifications";
 export { reportsApi } from "./reports";
 export { abuseReportsApi } from "./abuseReports";
+export { adminPayoutsApi } from "./adminPayouts";
+export { developerPayoutsApi } from "./developerPayouts";
 export { client, extractErrorMessage, mapUser, mapAuthResponse } from "./client";

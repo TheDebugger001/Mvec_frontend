@@ -17,32 +17,33 @@ export const money=(n,code='RWF')=>{
 // ─── status pill tones ─────────────────────────────────────────────────────────
 
 const TONE_STYLES={
-  good:{dot:'bg-emerald-500',pill:'bg-emerald-50 text-emerald-600 border border-emerald-200/50'},
-  warn:{dot:'bg-amber-500',pill:'bg-amber-50 text-amber-600 border border-amber-200/50'},
-  susp:{dot:'bg-orange-500',pill:'bg-orange-50 text-orange-600 border border-orange-200/50'},
-  bad:{dot:'bg-rose-500',pill:'bg-rose-50 text-rose-600 border border-rose-200/50'},
-  info:{dot:'bg-amber-500',pill:'bg-amber-50 text-amber-600 border border-amber-200/50'},
-  neutral:{dot:'bg-slate-300',pill:'bg-slate-50 text-slate-500 border border-slate-100'},
+  good:{pill:'bg-emerald-100 text-emerald-700 border border-emerald-300'},
+  susp:{pill:'bg-amber-100 text-amber-700 border border-amber-300'},
+  bad:{pill:'bg-rose-100 text-rose-700 border border-rose-300'},
+  info:{pill:'bg-indigo-100 text-indigo-700 border border-indigo-300'},
+  neutral:{pill:'bg-slate-100 text-slate-500 border border-slate-200'},
 };
 
+// Canonical form → tone map. Lookup normalizes any casing/underscoring so
+// badges resolve a color instead of falling back to gray (e.g. "ACTIVE",
+// "Suspend", "Suspended", "INVESTIGATE" all map to their correct tone).
 const TONE_BY_LABEL={
-  good:['Active','Completed','Released','Approved','Published','Paid','Available','Success','RELEASED','RECORDED','Delivered'],
-  warn:['Pending','Processing','Held','Under Review','Draft','Open','HELD'],
-  susp:['Suspended','Suspend'],
-  bad:['Block','Blocked','Rejected','Cancelled','Failed','On Hold','Frozen'],
-  info:['Investigation'],
+  good:['active','completed','released','approved','published','paid','available','success','delivered'],
+  susp:['suspend','suspended','pending','processing','held','under review','draft','open'],
+  bad:['block','blocked','rejected','cancelled','failed','on hold','frozen'],
+  info:['investigate','investigation'],
 };
 
 export const toneOf=(label='')=>{
-  const key=TONE_BY_LABEL[label]&&Object.keys(TONE_BY_LABEL).find(k=>TONE_BY_LABEL[k].includes(label));
+  const c=String(label).toLowerCase().replace(/[_\s-]+/g,' ').trim();
+  const key=Object.keys(TONE_BY_LABEL).find(k=>TONE_BY_LABEL[k].includes(c));
   return key||'neutral';
 };
 
-export function StatusPill({label,dot=true}){
+export function StatusPill({label}){
   const meta=TONE_STYLES[toneOf(label)]||TONE_STYLES.neutral;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-normal ${meta.pill}`}>
-      {dot&&<span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`}/>}
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${meta.pill}`}>
       {label}
     </span>
   );
@@ -64,10 +65,10 @@ export function LiveStatus({label}){
 // ─── default status menu options ───────────────────────────────────────────────
 
 export const STATUS_MENU_OPTIONS=[
-  {value:'Active',dot:'bg-emerald-500',menuText:'text-emerald-600',hover:'hover:bg-slate-100'},
-  {value:'Suspended',dot:'bg-orange-500',menuText:'text-orange-600',hover:'hover:bg-slate-100'},
-  {value:'Blocked',dot:'bg-rose-500',menuText:'text-rose-600',hover:'hover:bg-slate-100'},
-  {value:'Investigation',dot:'bg-amber-500',menuText:'text-amber-600',hover:'hover:bg-slate-100'},
+  {value:'Active',menuText:'text-emerald-600',hover:'hover:bg-slate-100'},
+  {value:'Suspend',menuText:'text-amber-600',hover:'hover:bg-slate-100'},
+  {value:'Block',menuText:'text-rose-600',hover:'hover:bg-slate-100'},
+  {value:'Investigate',menuText:'text-indigo-600',hover:'hover:bg-slate-100'},
 ];
 
 // ─── small building blocks ─────────────────────────────────────────────────────
@@ -616,7 +617,6 @@ export default function DataTable({
               onClick={()=>{stageStatus(openMenu,menuRow,opt.value);closeMenu();}}
               className={`${MENU_BTN} ${opt.menuText||'text-slate-600'} ${opt.hover||'hover:bg-slate-50'}`}
             >
-              <span className={`h-2 w-2 rounded-full ${opt.dot||'bg-slate-300'}`}/>
               {opt.label||opt.value}
             </button>
           ))}

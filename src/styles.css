@@ -252,12 +252,51 @@ a {
   font-weight: 800;
   transition: 0.2s;
 }
+/* Enhanced primary action button: generous width, modern blue gradient,
+   pill shape and tactile hover/active press feedback. */
 .gradient-btn {
-  background: var(--gradient);
-  color: #fff;
-  box-shadow: 0 8px 18px rgba(37, 173, 219, 0.18);
+  /* Dimensions & Spacing */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 170px;            /* Ample width to prevent text cramp */
+  padding: 0.65rem 1.5rem;     /* Increased horizontal padding */
+
+  /* Typography */
+  font-size: 0.875rem;         /* 14px */
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  color: #ffffff;
+  white-space: nowrap;         /* Prevents awkward text wrapping */
+
+  /* Visual Appearance */
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); /* Smooth blue gradient */
+  border: none;
+  border-radius: 9999px;       /* Sleek pill shape */
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+
+  /* Smooth Transitions */
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.gradient-btn:hover,
+/* Hover State */
+.gradient-btn:hover {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+/* Active Click State */
+.gradient-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
+}
+/* Disabled State */
+.gradient-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
 .buy-btn:hover {
   background: var(--hover);
   transform: translateY(-1px);
@@ -6934,6 +6973,48 @@ button:disabled {
 }
 .copy-link-btn {
   gap: 7px;
+}
+.affiliate-product-card {
+  display: flex;
+  flex-direction: column;
+}
+.affiliate-status-row {
+  margin-bottom: 12px;
+}
+.terminate-link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid #dc2626;
+  background: transparent;
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  white-space: nowrap;
+}
+.terminate-link-btn:hover {
+  background: #fef2f2;
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+.terminate-link-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+[data-theme="dark"] .terminate-link-btn {
+  border-color: #f87171;
+  color: #f87171;
+}
+[data-theme="dark"] .terminate-link-btn:hover {
+  background: rgba(220, 38, 38, 0.12);
+}
+.affiliate-product-card .affiliate-link-actions .gradient-btn {
+  justify-content: center;
 }
 .affiliate-total-label {
   color: var(--blue-deep);

@@ -5,4 +5,6 @@ export * from "./useOrders";
 export * from "./useWallet";
 export * from "./useReviews";
 export * from "./useAbuseReports";
+export * from "./useWholesaleProducts";
+export * from "./useAffiliateConversions";
 export { useLocalQuery } from "./useLocalQuery";

@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
 import Pagination from "../components/Pagination";
-import { products as seedProducts, categories as seedCategories, vendors as seedVendors } from "../data";
 import { loadCatalog } from "../services/catalogApi";
 import Storefront from "../components/Storefront";
 import Icon from "../components/Icon";
@@ -54,20 +53,20 @@ export default function Home() {
   const [vendorPage, setVendorPage] = useState(1);
   const pp = 8,
     vp = 4;
-  const [products, setProducts] = useState(seedProducts);
-  const [categories, setCategories] = useState(seedCategories);
-  const [vendors, setVendors] = useState(seedVendors);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [vendors, setVendors] = useState([]);
 
   useEffect(() => {
     let mounted = true;
     loadCatalog().then((cat) => {
       if (!mounted) return;
-      setProducts(cat.products && cat.products.length ? cat.products : seedProducts);
+      setProducts(cat.products || []);
       const cats = cat.categories && cat.categories.length
         ? cat.categories.map((c) => (typeof c === "string" ? c : c.name)).filter(Boolean)
-        : seedCategories;
-      setCategories(cats.length ? cats : seedCategories);
-      setVendors(cat.vendors && cat.vendors.length ? cat.vendors : seedVendors);
+        : [];
+      setCategories(cats);
+      setVendors(cat.vendors || []);
     });
     return () => { mounted = false; };
   }, []);
